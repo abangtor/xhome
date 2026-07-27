@@ -254,6 +254,17 @@ it through a native lock entity.
 - Add latest-event sensors.
 - Add latest-event `ImageEntity` if media URLs are stable.
 
+Current implementation fires Home Assistant bus events from the polled
+`v1/api/user/device/event/new` endpoint:
+
+- `xhome_event` for every new record
+- `xhome_doorbell` for ring/call-like records
+
+The Android app receives doorbell calls through mobile push providers
+(`FirebaseMessagingService`, Huawei Push, Xiaomi/Oppo/Vivo receivers) and a
+Lancens `PushInfo` path whose action is `call`. That is not implemented in Home
+Assistant yet.
+
 Outcome: Automations can react to XHome events without live P2P video.
 
 ### Phase 3: Safe Settings

@@ -106,6 +106,26 @@ secrets and redact sensitive values from logs and diagnostics.
 Door unlock is a sensitive operation. It should be exposed through Home
 Assistant's standard `lock.unlock` path rather than a second generic service.
 
+## Events
+
+The integration polls XHome's recent-event REST endpoint and fires Home
+Assistant bus events for new records:
+
+- `xhome_event` for every new XHome event record
+- `xhome_doorbell` for records that look like a doorbell/ring/call event
+
+Example automation trigger:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: xhome_doorbell
+```
+
+This is polling-based. The Android app receives near-real-time doorbell calls
+through mobile push providers and Lancens push hosts, but that push client path
+has not been reimplemented for Home Assistant yet.
+
 ## Development Roadmap
 
 1. Harden the config flow and coordinator with Home Assistant test coverage.

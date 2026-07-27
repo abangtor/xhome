@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
@@ -12,22 +13,39 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .api.client import JSON
 from .const import (
+    CONF_EVENT_SCAN_INTERVAL,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
+    DEFAULT_EVENT_SCAN_INTERVAL,
     DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    EVENT_XHOME_DOORBELL,
+    EVENT_XHOME_EVENT,
 )
-from .helpers import device_name, device_uid, first_from_sources, int_value, string_value, unwrap_dict
+from .helpers import (
+    device_name,
+    device_uid,
+    event_key,
+    event_payload,
+    event_records,
+    first_from_sources,
+    int_value,
+    is_doorbell_event,
+    string_value,
+    unwrap_dict,
+)
 
 LOGGER = logging.getLogger(__name__)
+MAX_SEEN_EVENT_KEYS = 500
 
 
 @dataclass(slots=True)
@@ -89,6 +107,9 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             region=config_entry.data.get(CONF_REGION, DEFAULT_REGION),
             timeout=config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         )
+        self._seen_event_keys: set[str] = set()
+        self._seen_event_order: deque[str] = deque()
+        self._event_poll_seeded = False
         super().__init__(
             hass,
             LOGGER,
@@ -98,6 +119,20 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 seconds=config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
             ),
         )
+
+    def async_start_event_polling(self) -> Any:
+        """Start polling for new XHome events."""
+
+        return async_track_time_interval(
+            self.hass,
+            self._async_event_poll_tick,
+            timedelta(seconds=self.config_entry.options.get(CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL)),
+        )
+
+    async def async_seed_events(self) -> None:
+        """Seed the event dedupe cache without firing historical events."""
+
+        await self.async_poll_events(seed_only=True)
 
     async def _async_update_data(self) -> XHomeCoordinatorData:
         """Fetch the latest data from XHome."""
@@ -121,11 +156,44 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
 
+    async def async_poll_events(self, *, seed_only: bool = False) -> None:
+        """Poll the XHome event endpoint and fire Home Assistant events."""
+
+        if self.data is None or not self.data.devices:
+            return
+        seed_only = seed_only or not self._event_poll_seeded
+
+        try:
+            events = await self.hass.async_add_executor_job(self._poll_device_events)
+        except XHomeAuthError as err:
+            self.client.token = None
+            LOGGER.warning("XHome event polling authentication failed: %s", err)
+            return
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            LOGGER.debug("XHome event polling failed: %s", err)
+            return
+
+        for event in events:
+            key = event["event_key"]
+            if not self._remember_event_key(key) or seed_only:
+                continue
+
+            payload = event["payload"]
+            self.hass.bus.async_fire(EVENT_XHOME_EVENT, payload)
+            if event["doorbell"]:
+                self.hass.bus.async_fire(EVENT_XHOME_DOORBELL, payload)
+        self._event_poll_seeded = True
+
     def _unlock_device(self, uid: str) -> JSON:
         """Synchronous unlock helper."""
 
         self._ensure_login()
         return self.client.unlock_door(uid)
+
+    async def _async_event_poll_tick(self, now: Any) -> None:
+        """Handle a scheduled event polling tick."""
+
+        await self.async_poll_events()
 
     def _update_data(self) -> XHomeCoordinatorData:
         """Synchronous data update helper."""
@@ -156,6 +224,31 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         return XHomeCoordinatorData(devices=runtime_devices)
 
+    def _poll_device_events(self) -> list[dict[str, Any]]:
+        """Fetch recent event records for all known devices."""
+
+        self._ensure_login()
+        if self.data is None:
+            return []
+
+        events: list[dict[str, Any]] = []
+        for data in self.data.devices.values():
+            device_type = string_value(data.first("type", "model", "device_type", "deviceType")) or "9"
+            payload = self.client.get_new_device_events(data.uid, device_type)
+            for record in event_records(payload):
+                key = event_key(data.uid, record)
+                events.append(
+                    {
+                        "event_key": key,
+                        "doorbell": is_doorbell_event(record),
+                        "payload": {
+                            **event_payload(data.device, record),
+                            "event_key": key,
+                        },
+                    }
+                )
+        return events
+
     def _ensure_login(self) -> None:
         """Log in when the client does not already have a token."""
 
@@ -174,3 +267,14 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             LOGGER.debug("Skipping optional XHome %s payload: %s", name, err)
             return {}
+
+    def _remember_event_key(self, key: str) -> bool:
+        """Remember an event key and return True if it is new."""
+
+        if key in self._seen_event_keys:
+            return False
+        while len(self._seen_event_order) >= MAX_SEEN_EVENT_KEYS:
+            self._seen_event_keys.discard(self._seen_event_order.popleft())
+        self._seen_event_order.append(key)
+        self._seen_event_keys.add(key)
+        return True

@@ -16,6 +16,9 @@ DEFAULT_REGION = "usa"
 DEFAULT_SCAN_INTERVAL = 60
 DEFAULT_TIMEOUT = 30
 
+EVENT_XHOME_DOORBELL = "xhome_doorbell"
+EVENT_XHOME_EVENT = "xhome_event"
+
 REGIONS = ["usa", "china", "europe", "test"]
 
 PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.BINARY_SENSOR]

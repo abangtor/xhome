@@ -44,6 +44,42 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertEqual(helpers.unwrap_dict({"data": {"battery": 100}}), {"battery": 100})
         self.assertEqual(helpers.unwrap_dict({"data": []}), {})
 
+    def test_event_records_extract_event_lists(self):
+        payload = {
+            "resultData": {
+                "eventList": [
+                    {"id": 1, "uid": "abc", "event_guid": "guid-1", "type": "1", "time_stamp": 123},
+                ],
+                "oneList": [
+                    {"id": 2, "uid": "abc", "event_guid": "guid-2", "type": "0", "time_stamp": 124},
+                ],
+            }
+        }
+
+        self.assertEqual([event["event_guid"] for event in helpers.event_records(payload)], ["guid-1", "guid-2"])
+
+    def test_event_key_prefers_event_guid(self):
+        self.assertEqual(
+            helpers.event_key("abc", {"id": 1, "event_guid": "guid-1", "type": "1"}),
+            "abc:guid:guid-1",
+        )
+
+    def test_doorbell_event_detection(self):
+        self.assertTrue(helpers.is_doorbell_event({"type": "1"}))
+        self.assertTrue(helpers.is_doorbell_event({"action": "call"}))
+        self.assertFalse(helpers.is_doorbell_event({"type": "2", "info": "fingerprint unlock"}))
+
+    def test_event_payload_redacts_uid_and_omits_media_url(self):
+        payload = helpers.event_payload(
+            {"uid": "abcdef123456", "name": "MainDoor", "id": 5},
+            {"id": 1, "event_guid": "guid-1", "type": "1", "time_stamp": 123, "m_oss_url": "https://secret"},
+        )
+
+        self.assertEqual(payload["device_name"], "MainDoor")
+        self.assertEqual(payload["uid_tail"], "...123456")
+        self.assertTrue(payload["has_image"])
+        self.assertNotIn("m_oss_url", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
