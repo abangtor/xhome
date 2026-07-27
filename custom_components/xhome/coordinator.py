@@ -7,8 +7,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
+import mimetypes
+from pathlib import Path
+import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from homeassistant.config_entries import ConfigEntry
@@ -35,21 +39,25 @@ from .const import (
     EVENT_XHOME_PREFIX,
 )
 from .helpers import (
+    device_key,
     device_name,
     device_uid,
     event_bus_types,
+    event_has_media,
     event_has_image,
     event_key,
     event_payload,
     event_records,
-    first_media_item,
-    first_present,
     first_from_sources,
+    first_present,
     guess_media_content_type,
     int_value,
+    is_image_media,
     is_doorbell_event,
+    is_video_media,
     media_url_from_event,
     media_url_from_item,
+    media_items,
     set_notify_category_enabled,
     string_value,
     unwrap_dict,
@@ -57,6 +65,7 @@ from .helpers import (
 
 LOGGER = logging.getLogger(__name__)
 MAX_SEEN_EVENT_KEYS = 500
+MEDIA_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 @dataclass(slots=True)
@@ -107,7 +116,7 @@ class XHomeCoordinatorData:
 
 @dataclass(slots=True)
 class XHomeLatestEventMedia:
-    """Resolved media for the latest image-bearing XHome event."""
+    """Resolved media for the latest XHome event."""
 
     uid: str
     event_key: str
@@ -117,11 +126,24 @@ class XHomeLatestEventMedia:
     time: str | None
     time_stamp: int | None
     url: str
+    media_kind: str = "unknown"
     file_name: str | None = None
     exp_time: int | None = None
     content_type: str | None = None
     video_status: int | None = None
     video_size: int | None = None
+
+
+@dataclass(slots=True)
+class XHomeDownloadedEventMedia:
+    """Local files downloaded from the latest XHome event media."""
+
+    uid: str
+    event_key: str
+    saved_at: int
+    media_count: int = 0
+    image_path: str | None = None
+    video_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -152,6 +174,8 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._event_poll_seeded = False
         self._latest_events: dict[str, XHomeLatestEvent] = {}
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
+        self._latest_event_video_media: dict[str, XHomeLatestEventMedia] = {}
+        self._downloaded_event_media: dict[str, XHomeDownloadedEventMedia] = {}
         super().__init__(
             hass,
             LOGGER,
@@ -185,6 +209,16 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Return cached latest event for a device."""
 
         return self._latest_events.get(uid)
+
+    def latest_event_video_media(self, uid: str) -> XHomeLatestEventMedia | None:
+        """Return cached latest event video media for a device."""
+
+        return self._latest_event_video_media.get(uid)
+
+    def downloaded_event_media(self, uid: str) -> XHomeDownloadedEventMedia | None:
+        """Return the latest local media download for a device."""
+
+        return self._downloaded_event_media.get(uid)
 
     async def _async_update_data(self) -> XHomeCoordinatorData:
         """Fetch the latest data from XHome."""
@@ -309,7 +343,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             is_new = self._remember_event_key(key)
             if is_new:
                 _keep_newest_event_candidate(event_candidates, event)
-            if is_new and event["has_image"]:
+            if is_new and event["has_media"]:
                 _keep_newest_media_candidate(media_candidates, event)
             if not is_new or seed_only:
                 continue
@@ -325,6 +359,51 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         if updated:
             self.async_update_listeners()
         self._event_poll_seeded = True
+
+    async def async_refresh_latest_event_media(self, uid: str) -> bool:
+        """Refresh latest event and media caches for one device."""
+
+        if self.data is None or uid not in self.data.devices:
+            raise HomeAssistantError("XHome device is unavailable")
+
+        try:
+            events = await self.hass.async_add_executor_job(self._poll_device_events_for_uids, {uid})
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError("XHome authentication failed while refreshing event media") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            raise HomeAssistantError(f"XHome event media refresh failed: {err}") from err
+
+        event_candidates: dict[str, dict[str, Any]] = {}
+        media_candidates: dict[str, dict[str, Any]] = {}
+        for event in sorted(events, key=_event_sort_key):
+            _keep_newest_event_candidate(event_candidates, event)
+            if event["has_media"]:
+                _keep_newest_media_candidate(media_candidates, event)
+
+        updated = self._update_latest_events(event_candidates.values())
+        if await self._async_update_latest_event_media(media_candidates.values()):
+            updated = True
+        if updated:
+            self.async_update_listeners()
+        return updated
+
+    async def async_download_latest_event_media(self, uid: str) -> XHomeDownloadedEventMedia | None:
+        """Fetch and save the latest event image/video media to the HA media folder."""
+
+        await self.async_refresh_latest_event_media(uid)
+        try:
+            downloaded = await self.hass.async_add_executor_job(self._download_latest_event_media_files, uid)
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError("XHome authentication failed while downloading event media") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError, OSError) as err:
+            raise HomeAssistantError(f"XHome event media download failed: {err}") from err
+
+        if downloaded is not None:
+            self._downloaded_event_media[uid] = downloaded
+            self.async_update_listeners()
+        return downloaded
 
     async def async_get_latest_event_image(self, uid: str) -> bytes | None:
         """Return latest event image bytes for a device."""
@@ -450,12 +529,21 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
     def _poll_device_events(self) -> list[dict[str, Any]]:
         """Fetch recent event records for all known devices."""
 
+        if self.data is None:
+            return []
+        return self._poll_device_events_for_uids(set(self.data.devices))
+
+    def _poll_device_events_for_uids(self, uids: set[str]) -> list[dict[str, Any]]:
+        """Fetch recent event records for selected devices."""
+
         self._ensure_login()
         if self.data is None:
             return []
 
         events: list[dict[str, Any]] = []
         for data in self.data.devices.values():
+            if data.uid not in uids:
+                continue
             device_type = string_value(data.first("type", "model", "device_type", "deviceType")) or "9"
             payload = self.client.get_new_device_events(data.uid, device_type)
             for record in event_records(payload):
@@ -470,6 +558,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                         "event_key": key,
                         "doorbell": is_doorbell_event(record),
                         "has_image": event_has_image(record),
+                        "has_media": event_has_media(record),
                         "record": record,
                         "sort_key": _record_sort_key(record),
                         "payload": payload,
@@ -502,7 +591,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         updated = False
         for event in events:
             try:
-                media = await self.hass.async_add_executor_job(self._resolve_event_media, event)
+                media_items = await self.hass.async_add_executor_job(self._resolve_event_media, event)
             except XHomeAuthError as err:
                 self.client.token = None
                 LOGGER.warning("XHome event media authentication failed: %s", err)
@@ -510,16 +599,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
                 LOGGER.debug("Skipping XHome event media for %s: %s", event.get("event_key"), err)
                 continue
-            if media is None:
-                continue
-            current = self._latest_event_media.get(media.uid)
-            if current is not None and _media_sort_key(current) > _media_sort_key(media):
-                continue
-            self._latest_event_media[media.uid] = media
-            updated = True
+            for media in media_items:
+                updated = self._cache_event_media(media) or updated
         return updated
 
-    def _resolve_event_media(self, event: dict[str, Any]) -> XHomeLatestEventMedia | None:
+    def _resolve_event_media(self, event: dict[str, Any]) -> list[XHomeLatestEventMedia]:
         """Resolve a signed media URL for an event."""
 
         self._ensure_login()
@@ -527,33 +611,63 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         uid = event["uid"]
         record = event["record"]
         event_guid = string_value(first_present(record, "event_guid", "eventGuid", "guid"))
-        media_item: dict[str, Any] | None = None
+        resolved: list[XHomeLatestEventMedia] = []
         url = media_url_from_event(record)
 
-        if url is None and event_guid:
-            media_payload = self.client.get_media_url(uid, event_guid)
-            media_item = first_media_item(media_payload)
-            if media_item is not None:
-                url = media_url_from_item(media_item)
-        if url is None:
-            return None
+        if url is not None:
+            resolved.append(self._media_from_url(event, url, media_item=None))
 
+        if event_guid:
+            media_payload = self.client.get_media_url(uid, event_guid)
+            for media_item in media_items(media_payload):
+                if item_url := media_url_from_item(media_item):
+                    resolved.append(self._media_from_url(event, item_url, media_item=media_item))
+        return resolved
+
+    def _media_from_url(
+        self,
+        event: dict[str, Any],
+        url: str,
+        *,
+        media_item: dict[str, Any] | None,
+    ) -> XHomeLatestEventMedia:
+        """Build media metadata for one resolved URL."""
+
+        record = event["record"]
         file_name = string_value(media_item.get("file_name")) if media_item else None
+        content_type = guess_media_content_type(url, file_name)
         return XHomeLatestEventMedia(
-            uid=uid,
+            uid=event["uid"],
             event_key=event["event_key"],
-            event_guid=event_guid,
+            event_guid=string_value(first_present(record, "event_guid", "eventGuid", "guid")),
             event_id=string_value(first_present(record, "id", "event_id", "eventId")),
             event_type=string_value(record.get("type")),
             time=string_value(record.get("time")),
             time_stamp=int_value(first_present(record, "time_stamp", "timeStamp", "timestamp")),
             url=url,
+            media_kind=_media_kind(url, content_type=content_type, file_name=file_name),
             file_name=file_name,
             exp_time=int_value(media_item.get("exp_time")) if media_item else None,
-            content_type=guess_media_content_type(url, file_name),
+            content_type=content_type,
             video_status=int_value(record.get("video_status")),
             video_size=int_value(record.get("video_size")),
         )
+
+    def _cache_event_media(self, media: XHomeLatestEventMedia) -> bool:
+        """Cache media by kind and return True when a cache changed."""
+
+        if media.media_kind == "video":
+            cache = self._latest_event_video_media
+        elif media.media_kind == "image":
+            cache = self._latest_event_media
+        else:
+            cache = self._latest_event_media
+
+        current = cache.get(media.uid)
+        if current is not None and _media_sort_key(current) > _media_sort_key(media):
+            return False
+        cache[media.uid] = media
+        return True
 
     def _download_latest_event_image(self, uid: str) -> bytes | None:
         """Download latest event image bytes from the cached signed URL."""
@@ -562,17 +676,75 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         if media is None:
             return None
 
+        content = self._download_event_media_bytes(media)
+        if content is None:
+            return None
+        if media.media_kind == "video":
+            return None
+        if media.content_type is not None and not media.content_type.startswith("image/"):
+            return None
+        return content
+
+    def _download_event_media_bytes(self, media: XHomeLatestEventMedia) -> bytes | None:
+        """Download event media bytes from the cached signed URL."""
+
         if _media_url_expired(media):
             self._refresh_event_media_url(media)
         response = self.client.session.get(media.url, timeout=self.client.timeout)
         response.raise_for_status()
         response_content_type = _response_content_type(response)
-        content_type = response_content_type or media.content_type
-        if content_type is not None and not content_type.startswith("image/"):
-            media.content_type = content_type
-            return None
-        media.content_type = content_type or "image/jpeg"
+        content_type = _usable_content_type(response_content_type) or media.content_type or response_content_type
+        media.content_type = content_type
+        media_kind = _media_kind(media.url, content_type=content_type, file_name=media.file_name)
+        if media_kind != "unknown":
+            media.media_kind = media_kind
         return response.content or None
+
+    def _download_latest_event_media_files(self, uid: str) -> XHomeDownloadedEventMedia | None:
+        """Download latest image/video media files into Home Assistant's media directory."""
+
+        event_media = (
+            self._latest_event_media.get(uid),
+            self._latest_event_video_media.get(uid),
+        )
+        available_media = [media for media in event_media if media is not None]
+        if not available_media:
+            return None
+
+        media_dir = Path(self.hass.config.path("media", DOMAIN, device_key(uid)))
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        image_path: str | None = None
+        video_path: str | None = None
+        media_count = 0
+        for media in available_media:
+            content = self._download_event_media_bytes(media)
+            if not content:
+                continue
+            filename = _media_filename(media)
+            path = media_dir / filename
+            path.write_bytes(content)
+            rel_path = str(Path("media", DOMAIN, device_key(uid), filename))
+            media_count += 1
+            if media.media_kind == "video":
+                self._latest_event_video_media[uid] = media
+                video_path = rel_path
+            else:
+                self._latest_event_media[uid] = media
+                image_path = rel_path
+
+        if media_count == 0:
+            return None
+
+        newest = max(available_media, key=_media_sort_key)
+        return XHomeDownloadedEventMedia(
+            uid=uid,
+            event_key=newest.event_key,
+            saved_at=int(time.time()),
+            media_count=media_count,
+            image_path=image_path,
+            video_path=video_path,
+        )
 
     def _refresh_event_media_url(self, media: XHomeLatestEventMedia) -> None:
         """Refresh an expired signed media URL when possible."""
@@ -582,7 +754,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         self._ensure_login()
         media_payload = self.client.get_media_url(media.uid, media.event_guid)
-        media_item = first_media_item(media_payload)
+        media_item = _matching_media_item(media_payload, media.media_kind)
         if media_item is None:
             return
 
@@ -595,6 +767,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         media.file_name = file_name
         media.exp_time = int_value(media_item.get("exp_time"))
         media.content_type = guess_media_content_type(url, file_name)
+        media.media_kind = _media_kind(url, content_type=media.content_type, file_name=file_name)
 
     def _ensure_login(self) -> None:
         """Log in when the client does not already have a token."""
@@ -685,6 +858,85 @@ def _media_url_expired(media: XHomeLatestEventMedia) -> bool:
     """Return True when a signed media URL appears expired or nearly expired."""
 
     return media.exp_time is not None and media.exp_time <= int(time.time()) + 60
+
+
+def _media_kind(url: str, *, content_type: str | None = None, file_name: str | None = None) -> str:
+    """Return whether a media URL looks like an image, video, or unknown file."""
+
+    usable_content_type = _usable_content_type(content_type)
+    if is_image_media(url, content_type=usable_content_type, file_name=file_name):
+        return "image"
+    if is_video_media(url, content_type=usable_content_type, file_name=file_name):
+        return "video"
+    return "unknown"
+
+
+def _matching_media_item(payload: JSON | None, media_kind: str) -> dict[str, Any] | None:
+    """Return the best replacement OSS item for a cached media kind."""
+
+    items = media_items(payload)
+    for item in items:
+        url = media_url_from_item(item)
+        if url is None:
+            continue
+        file_name = string_value(item.get("file_name"))
+        if media_kind == "image" and is_image_media(url, file_name=file_name):
+            return item
+        if media_kind == "video" and is_video_media(url, file_name=file_name):
+            return item
+    return items[0] if items else None
+
+
+def _media_filename(media: XHomeLatestEventMedia) -> str:
+    """Return a safe local filename for downloaded event media."""
+
+    if media.file_name:
+        file_name = Path(media.file_name.replace("\\", "/")).name
+    else:
+        file_name = f"{_event_file_stem(media)}{_media_extension(media)}"
+
+    sanitized = MEDIA_FILENAME_SAFE.sub("_", file_name).strip("._-")
+    if not sanitized:
+        sanitized = f"{_event_file_stem(media)}{_media_extension(media)}"
+    if "." not in sanitized:
+        sanitized = f"{sanitized}{_media_extension(media)}"
+    return sanitized
+
+
+def _event_file_stem(media: XHomeLatestEventMedia) -> str:
+    """Return a stable filename stem without leaking the full device UID."""
+
+    key_tail = media.event_guid or media.event_id or media.event_key.rsplit(":", 1)[-1] or "event"
+    stem = MEDIA_FILENAME_SAFE.sub("_", key_tail).strip("._-")
+    return stem or "event"
+
+
+def _media_extension(media: XHomeLatestEventMedia) -> str:
+    """Return a file extension for downloaded media."""
+
+    suffix = Path(urlparse(media.url).path).suffix
+    if suffix:
+        return suffix[:16]
+    if media.content_type:
+        extension = mimetypes.guess_extension(media.content_type)
+        if extension:
+            return extension
+    if media.media_kind == "video":
+        return ".mp4"
+    if media.media_kind == "image":
+        return ".jpg"
+    return ".bin"
+
+
+def _usable_content_type(content_type: str | None) -> str | None:
+    """Ignore generic object-store content types when filenames are more useful."""
+
+    if content_type is None:
+        return None
+    normalized = content_type.split(";", 1)[0].strip().lower()
+    if normalized in {"application/octet-stream", "binary/octet-stream"}:
+        return None
+    return normalized
 
 
 def _flag(value: bool) -> int:

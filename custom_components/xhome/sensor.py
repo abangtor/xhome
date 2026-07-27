@@ -14,7 +14,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import XHomeDataUpdateCoordinator, XHomeDeviceRuntimeData
+from .coordinator import XHomeDataUpdateCoordinator, XHomeDeviceRuntimeData, XHomeLatestEventMedia
 from .entity import XHomeEntity
 from .helpers import int_value, string_value
 
@@ -78,6 +78,7 @@ async def async_setup_entry(
                 for description in SENSORS
             ),
             *(XHomeLastEventSensor(coordinator, uid) for uid in coordinator.data.devices),
+            *(XHomeLatestEventVideoSensor(coordinator, uid) for uid in coordinator.data.devices),
         ]
     )
 
@@ -138,3 +139,61 @@ class XHomeLastEventSensor(XHomeEntity, SensorEntity):
 
         attrs.update(latest.payload)
         return {key: value for key, value in attrs.items() if value is not None}
+
+
+class XHomeLatestEventVideoSensor(XHomeEntity, SensorEntity):
+    """Latest XHome event video metadata sensor."""
+
+    _attr_icon = "mdi:video"
+    _attr_translation_key = "latest_event_video"
+
+    def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
+        """Initialize the latest event video sensor."""
+
+        super().__init__(coordinator, uid, "latest_event_video")
+
+    @property
+    def native_value(self) -> str | None:
+        """Return whether the latest event has a video clip."""
+
+        return "available" if self._media is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return non-sensitive latest event video metadata."""
+
+        attrs = super().extra_state_attributes
+        media = self._media
+        if media is None:
+            return attrs
+
+        attrs.update(
+            {
+                "event_key": media.event_key,
+                "event_guid": media.event_guid,
+                "event_id": media.event_id,
+                "event_type": media.event_type,
+                "event_time": media.time,
+                "event_time_stamp": media.time_stamp,
+                "file_name": media.file_name,
+                "content_type": media.content_type,
+                "expires_at": media.exp_time,
+                "video_status": media.video_status,
+                "video_size": media.video_size,
+            }
+        )
+        downloaded = self.coordinator.downloaded_event_media(self.uid)
+        if downloaded is not None and downloaded.event_key == media.event_key:
+            attrs.update(
+                {
+                    "saved_video_path": downloaded.video_path,
+                    "saved_at": downloaded.saved_at,
+                }
+            )
+        return {key: value for key, value in attrs.items() if value is not None}
+
+    @property
+    def _media(self) -> XHomeLatestEventMedia | None:
+        """Return cached video media for this entity."""
+
+        return self.coordinator.latest_event_video_media(self.uid)

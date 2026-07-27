@@ -23,6 +23,7 @@ Expose XHome door devices cleanly in Home Assistant:
 - Battery, RSSI, online, firmware, and diagnostic sensors
 - Writable controls for routine device settings
 - Latest event image through a native Home Assistant image entity
+- Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
 
 ## Planned Structure
@@ -156,19 +157,23 @@ kind, and its attributes include the redacted event id/GUID, raw XHome type,
 type name, timestamp, image/video flags, and decoded lock-event codes when the
 app embeds them.
 
-## Event Images
+## Event Media
 
-The integration exposes an `image` entity for each device's latest image-bearing
-event. When a new event references media, the coordinator resolves the event's
-signed OSS URL and the image entity downloads the bytes only when Home Assistant
-requests the image.
+The integration exposes an `image` entity for each device's latest event image.
+Some XHome event records contain a direct image URL, while others only contain
+an `event_guid`; in that case the coordinator uses the app's OSS media endpoint
+to resolve the signed image URL.
 
-Signed media URLs are not exposed in entity state or diagnostics. The entity
-keeps only redacted event metadata such as event GUID, event type, timestamp,
-file name, and expiry timestamp.
+Each device also has a `Fetch latest event media` button. Pressing it polls the
+latest cloud event for that device, resolves available OSS media, and saves the
+latest image and any event video clip under Home Assistant's `media/xhome/...`
+folder. The `Latest event image` entity and `Latest event video` sensor expose
+only non-sensitive metadata and local media paths; signed OSS URLs are not
+exposed in entity state or diagnostics.
 
-This is event media, not a live camera stream. Live video uses the app's native
-P2P stack and is still out of scope for this REST-first integration.
+This is event media, not a live camera stream or a command to start recording.
+Live viewing and active recording use the app's native P2P stack and are still
+out of scope for this REST-first integration.
 
 ## Development Roadmap
 

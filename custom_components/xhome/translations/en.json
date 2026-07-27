@@ -41,6 +41,11 @@
         "name": "Door lock"
       }
     },
+    "button": {
+      "fetch_latest_event_media": {
+        "name": "Fetch latest event media"
+      }
+    },
     "sensor": {
       "battery": {
         "name": "Battery"
@@ -56,6 +61,9 @@
       },
       "last_event": {
         "name": "Last event"
+      },
+      "latest_event_video": {
+        "name": "Latest event video"
       }
     },
     "binary_sensor": {

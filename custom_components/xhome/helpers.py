@@ -114,6 +114,7 @@ EVENT_TEXT_KIND_MARKERS = (
 )
 MEDIA_LIST_KEYS = ("data", "files", "list", "media", "mediaList", "rows", "result")
 MEDIA_URL_KEYS = ("oss_url", "m_oss_url", "img", "image", "image_url", "imageUrl", "url")
+EVENT_GUID_KEYS = ("event_guid", "eventGuid", "guid")
 NOTIFY_MASK_SENTINEL = 1
 
 
@@ -251,7 +252,7 @@ def event_records(payload: JSON | None) -> list[dict[str, Any]]:
 def event_key(uid: str, event: dict[str, Any]) -> str:
     """Build a stable event key for deduplication."""
 
-    for key in ("event_guid", "eventGuid", "guid"):
+    for key in EVENT_GUID_KEYS:
         if value := string_value(event.get(key)):
             return f"{uid}:guid:{value}"
     for key in ("id", "event_id", "eventId"):
@@ -361,6 +362,7 @@ def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, An
         "name": string_value(event.get("name")),
         "remarks": string_value(event.get("remarks")),
         "has_image": bool(string_value(event.get("img")) or string_value(event.get("m_oss_url"))),
+        "has_media": event_has_media(event),
         "video_status": int_value(event.get("video_status")),
         "video_size": int_value(event.get("video_size")),
     }
@@ -372,6 +374,12 @@ def event_has_image(event: dict[str, Any]) -> bool:
     """Return True when an event has an image field or resolvable media URL."""
 
     return any(string_value(event.get(key)) for key in ("img", "m_oss_url"))
+
+
+def event_has_media(event: dict[str, Any]) -> bool:
+    """Return True when an event may have resolvable cloud media."""
+
+    return event_has_image(event) or any(string_value(event.get(key)) for key in EVENT_GUID_KEYS)
 
 
 def media_items(payload: JSON | None) -> list[dict[str, Any]]:
@@ -391,6 +399,16 @@ def first_media_item(payload: JSON | None) -> dict[str, Any] | None:
         if url and is_image_media(url, file_name=string_value(item.get("file_name"))):
             return item
     return items[0] if items else None
+
+
+def first_video_media_item(payload: JSON | None) -> dict[str, Any] | None:
+    """Return the first video-looking media item."""
+
+    for item in media_items(payload):
+        url = media_url_from_item(item)
+        if url and is_video_media(url, file_name=string_value(item.get("file_name"))):
+            return item
+    return None
 
 
 def media_url_from_event(event: dict[str, Any]) -> str | None:
@@ -421,6 +439,13 @@ def is_image_media(url: str, *, content_type: str | None = None, file_name: str 
 
     guessed = content_type or guess_media_content_type(url, file_name)
     return guessed is not None and guessed.startswith("image/")
+
+
+def is_video_media(url: str, *, content_type: str | None = None, file_name: str | None = None) -> bool:
+    """Return True when media metadata suggests a video."""
+
+    guessed = content_type or guess_media_content_type(url, file_name)
+    return guessed is not None and guessed.startswith("video/")
 
 
 def _event_records_from_value(value: Any) -> list[dict[str, Any]]:

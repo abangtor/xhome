@@ -24,6 +24,7 @@ REGIONS = ["usa", "china", "europe", "test"]
 
 PLATFORMS = [
     Platform.LOCK,
+    Platform.BUTTON,
     Platform.SWITCH,
     Platform.SELECT,
     Platform.NUMBER,

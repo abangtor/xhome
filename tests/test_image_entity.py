@@ -81,7 +81,11 @@ spec.loader.exec_module(image)
 
 class ImageEntityTests(unittest.TestCase):
     def test_latest_event_image_initializes_image_access_token(self):
-        coordinator = types.SimpleNamespace(hass=object(), latest_event_media=lambda uid: None)
+        coordinator = types.SimpleNamespace(
+            hass=object(),
+            latest_event_media=lambda uid: None,
+            downloaded_event_media=lambda uid: None,
+        )
 
         entity = image.XHomeLatestEventImage(coordinator, "abc")
 

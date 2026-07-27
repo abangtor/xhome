@@ -126,12 +126,18 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertEqual(payload["event_kind"], "doorbell")
         self.assertEqual(payload["event_type_name"], "call")
         self.assertTrue(payload["has_image"])
+        self.assertTrue(payload["has_media"])
         self.assertNotIn("m_oss_url", payload)
 
     def test_event_has_image_accepts_image_fields(self):
         self.assertTrue(helpers.event_has_image({"img": "snapshot.jpg"}))
         self.assertTrue(helpers.event_has_image({"m_oss_url": "https://example.test/snapshot.jpg"}))
         self.assertFalse(helpers.event_has_image({"event_guid": "guid-1"}))
+
+    def test_event_has_media_accepts_event_guid(self):
+        self.assertTrue(helpers.event_has_media({"event_guid": "guid-1"}))
+        self.assertTrue(helpers.event_has_media({"eventGuid": "guid-2"}))
+        self.assertFalse(helpers.event_has_media({"id": 1, "type": "1"}))
 
     def test_media_items_extract_oss_urls(self):
         payload = {
@@ -151,6 +157,22 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(helpers.media_url_from_item(item), "https://example.test/snapshot.jpg?token=secret")
         self.assertEqual(helpers.guess_media_content_type(item["oss_url"], item["file_name"]), "image/jpeg")
+
+    def test_first_video_media_item_prefers_video_urls(self):
+        payload = {
+            "resultData": {
+                "data": [
+                    {"oss_url": "https://example.test/snapshot.jpg", "file_name": "snapshot.jpg"},
+                    {"oss_url": "https://example.test/event.mp4?token=secret", "file_name": "event.mp4"},
+                ]
+            }
+        }
+
+        item = helpers.first_video_media_item(payload)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(helpers.media_url_from_item(item), "https://example.test/event.mp4?token=secret")
+        self.assertTrue(helpers.is_video_media(item["oss_url"], file_name=item["file_name"]))
 
     def test_media_url_from_event_requires_http_url(self):
         self.assertEqual(
