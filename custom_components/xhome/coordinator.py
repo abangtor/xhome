@@ -337,14 +337,14 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             return
 
         event_candidates: dict[str, dict[str, Any]] = {}
-        media_candidates: dict[str, dict[str, Any]] = {}
+        media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
             is_new = self._remember_event_key(key)
             if is_new:
                 _keep_newest_event_candidate(event_candidates, event)
             if is_new and event["has_media"]:
-                _keep_newest_media_candidate(media_candidates, event)
+                media_candidates.append(event)
             if not is_new or seed_only:
                 continue
 
@@ -354,7 +354,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 self.hass.bus.async_fire(event_type, payload)
 
         updated = self._update_latest_events(event_candidates.values())
-        if await self._async_update_latest_event_media(media_candidates.values()):
+        if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
             self.async_update_listeners()
@@ -375,14 +375,14 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             raise HomeAssistantError(f"XHome event media refresh failed: {err}") from err
 
         event_candidates: dict[str, dict[str, Any]] = {}
-        media_candidates: dict[str, dict[str, Any]] = {}
+        media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             _keep_newest_event_candidate(event_candidates, event)
             if event["has_media"]:
-                _keep_newest_media_candidate(media_candidates, event)
+                media_candidates.append(event)
 
         updated = self._update_latest_events(event_candidates.values())
-        if await self._async_update_latest_event_media(media_candidates.values()):
+        if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
             self.async_update_listeners()
@@ -818,14 +818,6 @@ def _media_sort_key(media: XHomeLatestEventMedia) -> tuple[int, str]:
     """Return a stable ordering key for cached media."""
 
     return (media.time_stamp or 0, media.event_id or media.event_guid or media.event_key)
-
-
-def _keep_newest_media_candidate(candidates: dict[str, dict[str, Any]], event: dict[str, Any]) -> None:
-    """Keep only the newest media candidate for each device in a poll."""
-
-    current = candidates.get(event["uid"])
-    if current is None or event["sort_key"] >= current["sort_key"]:
-        candidates[event["uid"]] = event
 
 
 def _keep_newest_event_candidate(candidates: dict[str, dict[str, Any]], event: dict[str, Any]) -> None:

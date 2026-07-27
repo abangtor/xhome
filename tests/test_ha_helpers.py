@@ -175,9 +175,19 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertTrue(helpers.is_video_media(item["oss_url"], file_name=item["file_name"]))
 
     def test_media_url_from_event_requires_http_url(self):
+        encoded_url = base64.b64encode(b"https://example.test/snapshot.jpg?token=secret").decode("ascii")
+
         self.assertEqual(
             helpers.media_url_from_event({"m_oss_url": "https://example.test/snapshot.jpg"}),
             "https://example.test/snapshot.jpg",
+        )
+        self.assertEqual(
+            helpers.media_url_from_event({"img": encoded_url}),
+            "https://example.test/snapshot.jpg?token=secret",
+        )
+        self.assertEqual(
+            helpers.media_url_from_item({"oss_url": encoded_url}),
+            "https://example.test/snapshot.jpg?token=secret",
         )
         self.assertIsNone(helpers.media_url_from_event({"img": "relative/snapshot.jpg"}))
 

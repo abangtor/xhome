@@ -504,11 +504,26 @@ def _first_http_url(value: str | None) -> str | None:
 
     if not value:
         return None
-    normalized = value.strip()
-    parsed = urlparse(normalized)
-    if parsed.scheme in {"http", "https"} and parsed.netloc:
-        return normalized
+    for candidate in _url_candidates(value):
+        parsed = urlparse(candidate)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return candidate
     return None
+
+
+def _url_candidates(value: str) -> tuple[str, ...]:
+    """Return raw and base64-decoded URL candidates."""
+
+    normalized = value.strip()
+    candidates = [normalized]
+    try:
+        padded = normalized + "=" * (-len(normalized) % 4)
+        decoded = base64.b64decode(padded, validate=False).decode("utf-8").strip()
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        decoded = ""
+    if decoded and decoded != normalized:
+        candidates.append(decoded)
+    return tuple(candidates)
 
 
 def _event_text_haystack(event: dict[str, Any]) -> str:
