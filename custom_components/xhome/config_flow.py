@@ -86,7 +86,7 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize the options flow."""
 
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manage integration options."""
@@ -100,17 +100,17 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_SCAN_INTERVAL,
-                        default=self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                        default=self._config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                     ): vol.All(vol.Coerce(int), vol.Range(min=15, max=3600)),
                     vol.Required(
                         CONF_EVENT_SCAN_INTERVAL,
-                        default=self.config_entry.options.get(
+                        default=self._config_entry.options.get(
                             CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
                     vol.Required(
                         CONF_TIMEOUT,
-                        default=self.config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+                        default=self._config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
                     ): vol.All(vol.Coerce(int), vol.Range(min=5, max=120)),
                 }
             ),
