@@ -107,6 +107,18 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["time"], 123)
         self.assertEqual(kwargs["json"]["sign"], "e70c099b2659269d70dc28450efab4e48cfd5509")
 
+    def test_lock_door_body_uses_uid_and_signed_timestamp(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.lock_door("abc", timestamp=123)
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/door/lock")
+        self.assertEqual(kwargs["json"]["uid"], "abc")
+        self.assertEqual(kwargs["json"]["time"], 123)
+        self.assertEqual(kwargs["json"]["sign"], "e70c099b2659269d70dc28450efab4e48cfd5509")
+
     def test_add_device_share_uses_idcode_header_and_uuid(self):
         session = FakeSession({"message": "ok"})
         client = XHomeClient(token="tok", session=session)

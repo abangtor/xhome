@@ -19,7 +19,7 @@ generation are out of scope for the first Home Assistant version.
 
 Expose XHome door devices cleanly in Home Assistant:
 
-- Door unlock through a native `LockEntity`
+- Door lock/unlock through a native `LockEntity`
 - Battery, RSSI, online, firmware, and diagnostic sensors
 - Latest event image through a native Home Assistant image entity
 - Event/media polling where the cloud REST API supports it
@@ -110,8 +110,9 @@ Do not commit credentials, tokens, full device UIDs, or captured private media.
 The integration must store credentials through Home Assistant config entries or
 secrets and redact sensitive values from logs and diagnostics.
 
-Door unlock is a sensitive operation. It should be exposed through Home
-Assistant's standard `lock.unlock` path rather than a second generic service.
+Door lock/unlock operations are sensitive. They should be exposed through Home
+Assistant's standard `lock.lock` and `lock.unlock` paths rather than second
+generic services.
 
 ## Events
 
@@ -159,8 +160,8 @@ P2P stack and is still out of scope for this REST-first integration.
 ## Development Roadmap
 
 1. Harden the config flow and coordinator with Home Assistant test coverage.
-2. Test setup against a real Home Assistant instance without triggering unlock.
-3. Manually test `lock.unlock` once only when explicitly requested.
+2. Test setup against a real Home Assistant instance without triggering lock/unlock.
+3. Manually test `lock.lock` and `lock.unlock` only when explicitly requested.
 4. Add event/media polling.
 5. Add safe settings entities.
 6. Add hassfest, Home Assistant runtime tests, and release polish.

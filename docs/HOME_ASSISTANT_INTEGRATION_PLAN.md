@@ -88,7 +88,7 @@ Expose door devices as `LockEntity`.
 Initial behavior:
 
 - `unlock()` calls `XHomeClient.unlock_door(uid)`.
-- `lock()` is not supported unless a real lock command is later found.
+- `lock()` calls `XHomeClient.lock_door(uid)`.
 - State should be treated as assumed or unknown, because the cloud REST API has
   a confirmed unlock action but no confirmed authoritative locked-state read.
 - After unlock, briefly show optimistic unlocked state, then return to assumed

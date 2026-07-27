@@ -207,6 +207,17 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
 
+    async def async_lock_device(self, uid: str) -> JSON:
+        """Lock a door device through the XHome cloud."""
+
+        try:
+            return await self.hass.async_add_executor_job(self._lock_device, uid)
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError("XHome authentication failed while locking") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            raise HomeAssistantError(f"XHome lock failed: {err}") from err
+
     async def async_poll_events(self, *, seed_only: bool = False) -> None:
         """Poll the XHome event endpoint and fire Home Assistant events."""
 
@@ -262,6 +273,12 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         self._ensure_login()
         return self.client.unlock_door(uid)
+
+    def _lock_device(self, uid: str) -> JSON:
+        """Synchronous lock helper."""
+
+        self._ensure_login()
+        return self.client.lock_door(uid)
 
     async def _async_event_poll_tick(self, now: Any) -> None:
         """Handle a scheduled event polling tick."""

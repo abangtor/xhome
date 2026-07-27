@@ -51,9 +51,9 @@ class XHomeLockEntity(XHomeEntity, LockEntity):
     def is_locked(self) -> bool | None:
         """Return lock state.
 
-        XHome REST confirms unlock execution, but does not expose a reliable
-        locked-state read yet. Treat the entity as assumed locked except for a
-        short optimistic window after a successful unlock call.
+        XHome REST confirms lock and unlock execution, but does not expose a
+        reliable locked-state read yet. Treat the entity as assumed locked
+        except for a short optimistic window after a successful unlock call.
         """
 
         return time.monotonic() >= self._optimistic_unlocked_until
@@ -67,9 +67,12 @@ class XHomeLockEntity(XHomeEntity, LockEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_lock(self, **kwargs: Any) -> None:
-        """Reject lock requests because no lock REST command is known."""
+        """Lock the door through the XHome cloud."""
 
-        raise HomeAssistantError("XHome REST API does not expose a lock command")
+        await self.coordinator.async_lock_device(self.uid)
+        self._optimistic_unlocked_until = 0.0
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
 
 def _looks_like_lock(device: XHomeDeviceRuntimeData) -> bool:
@@ -80,4 +83,3 @@ def _looks_like_lock(device: XHomeDeviceRuntimeData) -> bool:
         return True
     name = device.name.lower()
     return "door" in name or "lock" in name
-
