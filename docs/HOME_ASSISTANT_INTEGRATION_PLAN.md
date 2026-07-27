@@ -259,6 +259,11 @@ Current implementation fires Home Assistant bus events from the polled
 
 - `xhome_event` for every new record
 - `xhome_doorbell` for ring/call-like records
+- classified events such as `xhome_unlock`, `xhome_motion`,
+  `xhome_low_battery`, `xhome_lock`, `xhome_lock_event`, `xhome_alarm`,
+  `xhome_tamper`, `xhome_offline`, and `xhome_online`
+- a latest event sensor per device with the normalized event kind as state and
+  redacted event metadata as attributes
 - a latest event image entity per device for the latest image-bearing event
 
 The Android app receives doorbell calls through mobile push providers

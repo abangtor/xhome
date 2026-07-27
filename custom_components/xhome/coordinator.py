@@ -32,10 +32,12 @@ from .const import (
     DOMAIN,
     EVENT_XHOME_DOORBELL,
     EVENT_XHOME_EVENT,
+    EVENT_XHOME_PREFIX,
 )
 from .helpers import (
     device_name,
     device_uid,
+    event_bus_types,
     event_has_image,
     event_key,
     event_payload,
@@ -121,6 +123,16 @@ class XHomeLatestEventMedia:
     video_size: int | None = None
 
 
+@dataclass(slots=True)
+class XHomeLatestEvent:
+    """Latest XHome event for one device."""
+
+    uid: str
+    event_key: str
+    sort_key: tuple[int, str]
+    payload: dict[str, Any]
+
+
 class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
     """Coordinate cloud polling for one XHome account."""
 
@@ -137,6 +149,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._seen_event_keys: set[str] = set()
         self._seen_event_order: deque[str] = deque()
         self._event_poll_seeded = False
+        self._latest_events: dict[str, XHomeLatestEvent] = {}
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         super().__init__(
             hass,
@@ -166,6 +179,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Return cached latest event media for a device."""
 
         return self._latest_event_media.get(uid)
+
+    def latest_event(self, uid: str) -> XHomeLatestEvent | None:
+        """Return cached latest event for a device."""
+
+        return self._latest_events.get(uid)
 
     async def _async_update_data(self) -> XHomeCoordinatorData:
         """Fetch the latest data from XHome."""
@@ -206,10 +224,13 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             LOGGER.debug("XHome event polling failed: %s", err)
             return
 
+        event_candidates: dict[str, dict[str, Any]] = {}
         media_candidates: dict[str, dict[str, Any]] = {}
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
             is_new = self._remember_event_key(key)
+            if is_new:
+                _keep_newest_event_candidate(event_candidates, event)
             if is_new and event["has_image"]:
                 _keep_newest_media_candidate(media_candidates, event)
             if not is_new or seed_only:
@@ -217,10 +238,13 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
             payload = event["payload"]
             self.hass.bus.async_fire(EVENT_XHOME_EVENT, payload)
-            if event["doorbell"]:
-                self.hass.bus.async_fire(EVENT_XHOME_DOORBELL, payload)
+            for event_type in event["bus_event_types"]:
+                self.hass.bus.async_fire(event_type, payload)
 
+        updated = self._update_latest_events(event_candidates.values())
         if await self._async_update_latest_event_media(media_candidates.values()):
+            updated = True
+        if updated:
             self.async_update_listeners()
         self._event_poll_seeded = True
 
@@ -286,6 +310,10 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             payload = self.client.get_new_device_events(data.uid, device_type)
             for record in event_records(payload):
                 key = event_key(data.uid, record)
+                payload = {
+                    **event_payload(data.device, record),
+                    "event_key": key,
+                }
                 events.append(
                     {
                         "uid": data.uid,
@@ -294,13 +322,29 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                         "has_image": event_has_image(record),
                         "record": record,
                         "sort_key": _record_sort_key(record),
-                        "payload": {
-                            **event_payload(data.device, record),
-                            "event_key": key,
-                        },
+                        "payload": payload,
+                        "bus_event_types": _event_bus_types(record),
                     }
                 )
         return events
+
+    def _update_latest_events(self, events: Iterable[dict[str, Any]]) -> bool:
+        """Cache the latest event per device."""
+
+        updated = False
+        for event in events:
+            latest = XHomeLatestEvent(
+                uid=event["uid"],
+                event_key=event["event_key"],
+                sort_key=event["sort_key"],
+                payload=event["payload"],
+            )
+            current = self._latest_events.get(latest.uid)
+            if current is not None and current.sort_key > latest.sort_key:
+                continue
+            self._latest_events[latest.uid] = latest
+            updated = True
+        return updated
 
     async def _async_update_latest_event_media(self, events: Iterable[dict[str, Any]]) -> bool:
         """Resolve and cache latest event media from event candidates."""
@@ -459,6 +503,23 @@ def _keep_newest_media_candidate(candidates: dict[str, dict[str, Any]], event: d
     current = candidates.get(event["uid"])
     if current is None or event["sort_key"] >= current["sort_key"]:
         candidates[event["uid"]] = event
+
+
+def _keep_newest_event_candidate(candidates: dict[str, dict[str, Any]], event: dict[str, Any]) -> None:
+    """Keep only the newest event candidate for each device in a poll."""
+
+    current = candidates.get(event["uid"])
+    if current is None or event["sort_key"] >= current["sort_key"]:
+        candidates[event["uid"]] = event
+
+
+def _event_bus_types(record: dict[str, Any]) -> tuple[str, ...]:
+    """Return specific bus event names, preserving the existing doorbell event."""
+
+    event_types = list(event_bus_types(record))
+    if is_doorbell_event(record) and EVENT_XHOME_DOORBELL not in event_types:
+        event_types.append(EVENT_XHOME_DOORBELL)
+    return tuple(event_type for event_type in event_types if event_type.startswith(EVENT_XHOME_PREFIX))
 
 
 def _response_content_type(response: requests.Response) -> str | None:

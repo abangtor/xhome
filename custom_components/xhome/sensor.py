@@ -79,9 +79,14 @@ async def async_setup_entry(
 
     coordinator: XHomeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        XHomeSensor(coordinator, uid, description)
-        for uid in coordinator.data.devices
-        for description in SENSORS
+        [
+            *(
+                XHomeSensor(coordinator, uid, description)
+                for uid in coordinator.data.devices
+                for description in SENSORS
+            ),
+            *(XHomeLastEventSensor(coordinator, uid) for uid in coordinator.data.devices),
+        ]
     )
 
 
@@ -108,3 +113,36 @@ class XHomeSensor(XHomeEntity, SensorEntity):
         if (data := self.device_data) is None:
             return None
         return self.entity_description.value_fn(data)
+
+
+class XHomeLastEventSensor(XHomeEntity, SensorEntity):
+    """Latest XHome event sensor."""
+
+    _attr_icon = "mdi:history"
+    _attr_translation_key = "last_event"
+
+    def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
+        """Initialize the latest event sensor."""
+
+        super().__init__(coordinator, uid, "last_event")
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the latest event kind."""
+
+        latest = self.coordinator.latest_event(self.uid)
+        if latest is None:
+            return None
+        return latest.payload.get("event_kind")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return latest event metadata."""
+
+        attrs = super().extra_state_attributes
+        latest = self.coordinator.latest_event(self.uid)
+        if latest is None:
+            return attrs
+
+        attrs.update(latest.payload)
+        return {key: value for key, value in attrs.items() if value is not None}

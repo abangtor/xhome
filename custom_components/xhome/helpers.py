@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import base64
+import binascii
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +16,102 @@ from .api.client import JSON, unwrap_response
 DOORBELL_EVENT_TYPES = {"1"}
 DOORBELL_TEXT_MARKERS = ("call", "doorbell", "door bell", "ding", "press", "ring", "visitor")
 EVENT_LIST_KEYS = ("eventList", "oneList", "events", "data", "list", "recordList", "rows", "result")
+PUSH_EVENT_KINDS = {
+    "0": "motion",
+    "1": "doorbell",
+    "2": "unlock",
+    "3": "unlock",
+    "4": "low_battery",
+    "5": "lock_event",
+    "6": "lock_event",
+    "8": "temperature_alarm",
+    "9": "temperature_alarm",
+    "10": "sound_alarm",
+    "11": "emergency",
+    "12": "alarm",
+    "13": "doorbell",
+    "20": "offline",
+    "21": "online",
+    "100": "transfer",
+    "200": "device_added",
+    "201": "refused",
+    "300": "server_update",
+}
+PUSH_EVENT_TYPE_NAMES = {
+    "0": "pir",
+    "1": "call",
+    "2": "fingerprint_unlock",
+    "3": "password_unlock",
+    "4": "low_power",
+    "5": "uart",
+    "6": "lock",
+    "8": "low_temperature_alarm",
+    "9": "high_temperature_alarm",
+    "10": "sound_alarm",
+    "11": "emergency_call",
+    "12": "stay_alarm",
+    "13": "indoor_call",
+    "20": "offline",
+    "21": "online",
+    "100": "transfer",
+    "200": "add",
+    "201": "refuse",
+    "300": "server_update",
+}
+LOCK_EVENT_ENCODED_FIELDS = {
+    "5": ("img",),
+    "6": ("info",),
+}
+LOCK_EVENT_KINDS = {
+    2: "unlock",
+    3: "unlock",
+    4: "unlock",
+    6: "unlock",
+    7: "low_battery",
+    8: "alarm",
+    9: "unlock",
+    10: "alarm",
+    11: "smoke_alarm",
+    12: "gas_alarm",
+    13: "emergency",
+    14: "motion",
+    15: "alarm",
+    16: "alarm",
+    17: "doorbell",
+    18: "alarm",
+    19: "lock",
+    20: "lock",
+    21: "unlock",
+    22: "alarm",
+    23: "unlock",
+    24: "unlock",
+    25: "tamper",
+    26: "alarm",
+    27: "alarm",
+    28: "alarm",
+    29: "unlock",
+    30: "user_added",
+    31: "user_deleted",
+    32: "user_deleted",
+    33: "unlock",
+    34: "mode_change",
+    35: "mode_change",
+    36: "unlock",
+    37: "doorbell",
+}
+ALARM_EVENT_KINDS = {"alarm", "emergency", "gas_alarm", "smoke_alarm", "sound_alarm", "tamper", "temperature_alarm"}
+EVENT_TEXT_KIND_MARKERS = (
+    ("unlock", ("unlock", "fingerprint", "password", "card", "remote control", "app remote")),
+    ("doorbell", DOORBELL_TEXT_MARKERS),
+    ("low_battery", ("low battery", "low power", "power alarm")),
+    ("motion", ("motion", "pir", "activity")),
+    ("tamper", ("tamper", "dismantle")),
+    ("emergency", ("emergency", "hijack", "hijacking")),
+    ("alarm", ("alarm", "smoke", "gas", "leak", "temperature", "sound", "noise")),
+    ("offline", ("offline",)),
+    ("online", ("online",)),
+    ("lock", ("locked", "lock")),
+)
 MEDIA_LIST_KEYS = ("data", "files", "list", "media", "mediaList", "rows", "result")
 MEDIA_URL_KEYS = ("oss_url", "m_oss_url", "img", "image", "image_url", "imageUrl", "url")
 
@@ -144,6 +242,9 @@ def event_key(uid: str, event: dict[str, Any]) -> str:
 def is_doorbell_event(event: dict[str, Any]) -> bool:
     """Return True when an XHome event appears to be a doorbell/ring event."""
 
+    if event_kind(event) == "doorbell":
+        return True
+
     event_type = string_value(event.get("type"))
     if event_type in DOORBELL_EVENT_TYPES:
         return True
@@ -155,17 +256,76 @@ def is_doorbell_event(event: dict[str, Any]) -> bool:
     return any(marker in haystack for marker in DOORBELL_TEXT_MARKERS)
 
 
+def event_kind(event: dict[str, Any]) -> str:
+    """Return a normalized kind for an XHome event."""
+
+    if lock_kind := lock_event_kind(event):
+        return lock_kind
+
+    event_type = string_value(event.get("type"))
+    if event_type and event_type in PUSH_EVENT_KINDS:
+        return PUSH_EVENT_KINDS[event_type]
+
+    haystack = _event_text_haystack(event)
+    for kind, markers in EVENT_TEXT_KIND_MARKERS:
+        if any(marker in haystack for marker in markers):
+            return kind
+    return "unknown"
+
+
+def event_bus_types(event: dict[str, Any]) -> tuple[str, ...]:
+    """Return specific Home Assistant event bus names for an XHome event."""
+
+    kind = event_kind(event)
+    if kind == "unknown":
+        return ()
+
+    event_types = [f"xhome_{kind}"]
+    if kind in ALARM_EVENT_KINDS:
+        event_types.append("xhome_alarm")
+    return tuple(dict.fromkeys(event_types))
+
+
+def lock_event_details(event: dict[str, Any]) -> dict[str, Any]:
+    """Return decoded lock-event fields when the event embeds them."""
+
+    event_type = string_value(event.get("type"))
+    for key in LOCK_EVENT_ENCODED_FIELDS.get(event_type or "", ()):
+        if details := _decode_base64_json(string_value(event.get(key))):
+            return {
+                "lock_event_type": string_value(details.get("event_type")),
+                "lock_event_content": string_value(details.get("content")),
+                "lock_event_device": string_value(details.get("event_device")),
+                "lock_event_user_id": string_value(details.get("user_id")),
+                "lock_event_app_user": string_value(details.get("app_user")),
+            }
+    return {}
+
+
+def lock_event_kind(event: dict[str, Any]) -> str | None:
+    """Return a normalized kind from an embedded lock-event payload."""
+
+    details = lock_event_details(event)
+    lock_event_type = _hex_int(details.get("lock_event_type"))
+    if lock_event_type is None:
+        return None
+    return LOCK_EVENT_KINDS.get(lock_event_type, "lock_event")
+
+
 def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     """Build a redacted Home Assistant event payload."""
 
     uid = device_uid(device) or string_value(event.get("uid")) or ""
-    return {
+    lock_details = lock_event_details(event)
+    payload = {
         "device_name": device_name(device),
         "device_id": int_value(first_present(device, "id", "device_id", "deviceId")),
         "uid_tail": redact_uid(uid) if uid else None,
         "event_guid": string_value(first_present(event, "event_guid", "eventGuid", "guid")),
         "event_id": string_value(first_present(event, "id", "event_id", "eventId")),
         "event_type": string_value(event.get("type")),
+        "event_type_name": PUSH_EVENT_TYPE_NAMES.get(string_value(event.get("type")) or ""),
+        "event_kind": event_kind(event),
         "action": string_value(event.get("action")),
         "time": string_value(event.get("time")),
         "time_stamp": int_value(first_present(event, "time_stamp", "timeStamp", "timestamp")),
@@ -176,6 +336,8 @@ def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, An
         "video_status": int_value(event.get("video_status")),
         "video_size": int_value(event.get("video_size")),
     }
+    payload.update(lock_details)
+    return payload
 
 
 def event_has_image(event: dict[str, Any]) -> bool:
@@ -294,3 +456,49 @@ def _first_http_url(value: str | None) -> str | None:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return normalized
     return None
+
+
+def _event_text_haystack(event: dict[str, Any]) -> str:
+    """Return searchable text for event classification."""
+
+    return " ".join(
+        string_value(event.get(key)) or ""
+        for key in (
+            "action",
+            "event_type",
+            "eventType",
+            "type_name",
+            "typeName",
+            "info",
+            "name",
+            "remarks",
+            "title",
+            "message",
+            "alert",
+        )
+    ).lower()
+
+
+def _decode_base64_json(value: str | None) -> dict[str, Any] | None:
+    """Decode a base64-encoded JSON object from the app's lock-event payload."""
+
+    if not value:
+        return None
+    try:
+        decoded = base64.b64decode(value, validate=False).decode("utf-8")
+        parsed = json.loads(decoded)
+    except (binascii.Error, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _hex_int(value: Any) -> int | None:
+    """Return an int parsed from the app's hex event-code strings."""
+
+    text = string_value(value)
+    if text is None:
+        return None
+    try:
+        return int(text, 16)
+    except ValueError:
+        return None

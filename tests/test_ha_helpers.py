@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
+import json
 from pathlib import Path
 import sys
 import types
@@ -69,6 +71,37 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertTrue(helpers.is_doorbell_event({"action": "call"}))
         self.assertFalse(helpers.is_doorbell_event({"type": "2", "info": "fingerprint unlock"}))
 
+    def test_event_kind_from_push_type(self):
+        self.assertEqual(helpers.event_kind({"type": "0"}), "motion")
+        self.assertEqual(helpers.event_kind({"type": "2"}), "unlock")
+        self.assertEqual(helpers.event_kind({"type": "3"}), "unlock")
+        self.assertEqual(helpers.event_kind({"type": "4"}), "low_battery")
+        self.assertEqual(helpers.event_kind({"type": "20"}), "offline")
+        self.assertEqual(helpers.event_kind({"type": "21"}), "online")
+
+    def test_event_kind_from_encoded_lock_event(self):
+        encoded = base64.b64encode(
+            json.dumps(
+                {
+                    "user_id": "1",
+                    "event_type": "15",
+                    "event_device": "LOCK_PUSH",
+                    "content": "09",
+                    "app_user": "Torsten",
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+
+        event = {"type": "6", "info": encoded}
+
+        self.assertEqual(helpers.event_kind(event), "unlock")
+        self.assertEqual(helpers.lock_event_details(event)["lock_event_type"], "15")
+
+    def test_event_bus_types_include_specific_and_alarm_events(self):
+        self.assertEqual(helpers.event_bus_types({"type": "2"}), ("xhome_unlock",))
+        self.assertEqual(helpers.event_bus_types({"type": "1"}), ("xhome_doorbell",))
+        self.assertEqual(helpers.event_bus_types({"type": "25", "info": "tamper alarm"}), ("xhome_tamper", "xhome_alarm"))
+
     def test_event_payload_redacts_uid_and_omits_media_url(self):
         payload = helpers.event_payload(
             {"uid": "abcdef123456", "name": "MainDoor", "id": 5},
@@ -77,6 +110,8 @@ class HomeAssistantHelperTests(unittest.TestCase):
 
         self.assertEqual(payload["device_name"], "MainDoor")
         self.assertEqual(payload["uid_tail"], "...123456")
+        self.assertEqual(payload["event_kind"], "doorbell")
+        self.assertEqual(payload["event_type_name"], "call")
         self.assertTrue(payload["has_image"])
         self.assertNotIn("m_oss_url", payload)
 

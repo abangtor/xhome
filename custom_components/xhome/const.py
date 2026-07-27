@@ -18,6 +18,7 @@ DEFAULT_TIMEOUT = 30
 
 EVENT_XHOME_DOORBELL = "xhome_doorbell"
 EVENT_XHOME_EVENT = "xhome_event"
+EVENT_XHOME_PREFIX = "xhome_"
 
 REGIONS = ["usa", "china", "europe", "test"]
 

@@ -120,6 +120,10 @@ Assistant bus events for new records:
 
 - `xhome_event` for every new XHome event record
 - `xhome_doorbell` for records that look like a doorbell/ring/call event
+- specific events such as `xhome_unlock`, `xhome_motion`,
+  `xhome_low_battery`, `xhome_lock`, `xhome_lock_event`, `xhome_alarm`,
+  `xhome_tamper`, `xhome_offline`, and `xhome_online` when the record can be
+  classified
 
 Example automation trigger:
 
@@ -132,6 +136,11 @@ triggers:
 This is polling-based. The Android app receives near-real-time doorbell calls
 through mobile push providers and Lancens push hosts, but that push client path
 has not been reimplemented for Home Assistant yet.
+
+Each device also has a `Last event` sensor. Its state is the normalized event
+kind, and its attributes include the redacted event id/GUID, raw XHome type,
+type name, timestamp, image/video flags, and decoded lock-event codes when the
+app embeds them.
 
 ## Event Images
 

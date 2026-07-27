@@ -56,6 +56,9 @@
       },
       "screen_timeout": {
         "name": "Screen timeout"
+      },
+      "last_event": {
+        "name": "Last event"
       }
     },
     "binary_sensor": {
