@@ -260,21 +260,6 @@ class XHomeClient:
 
         return self.open_lock(uuid, timestamp=timestamp)
 
-    def lock_door(self, uid: str, *, timestamp: int | None = None) -> JSON:
-        """Lock a door device via the cloud API."""
-
-        timestamp = int(time.time()) if timestamp is None else int(timestamp)
-        token = self.require_token()
-        return self.post(
-            "v1/api/app/door/lock",
-            {
-                "apikey": API_KEY,
-                "uid": uid,
-                "time": timestamp,
-                "sign": token_time_sign(token, uid, timestamp),
-            },
-        )
-
     def search_user(self, username: str) -> JSON:
         return self.post("v1/api/user/friend/username", {"username": username})
 

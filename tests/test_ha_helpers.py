@@ -41,6 +41,19 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertFalse(helpers.bool_value("0"))
         self.assertIsNone(helpers.bool_value("maybe"))
 
+    def test_notify_category_mask_helpers(self):
+        self.assertTrue(helpers.notify_category_enabled(0, (0, 1)))
+        self.assertTrue(helpers.notify_category_enabled(1, (0, 1)))
+        self.assertFalse(helpers.notify_category_enabled(3, (0,)))
+
+        mask = helpers.set_notify_category_enabled(0, (5, 6), False)
+        self.assertEqual(mask, 193)
+        self.assertFalse(helpers.notify_category_enabled(mask, (5, 6)))
+
+        mask = helpers.set_notify_category_enabled(mask, (5, 6), True)
+        self.assertEqual(mask, 1)
+        self.assertTrue(helpers.notify_category_enabled(mask, (5, 6)))
+
     def test_unwrap_dict(self):
         self.assertEqual(helpers.unwrap_dict({"resultData": {"battery": 100}}), {"battery": 100})
         self.assertEqual(helpers.unwrap_dict({"data": {"battery": 100}}), {"battery": 100})

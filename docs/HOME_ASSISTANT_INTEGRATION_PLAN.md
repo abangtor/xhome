@@ -88,11 +88,12 @@ Expose door devices as `LockEntity`.
 Initial behavior:
 
 - `unlock()` calls `XHomeClient.unlock_door(uid)`.
-- `lock()` calls `XHomeClient.lock_door(uid)`.
-- State should be treated as assumed or unknown, because the cloud REST API has
-  a confirmed unlock action but no confirmed authoritative locked-state read.
-- After unlock, briefly show optimistic unlocked state, then return to assumed
-  locked/unknown after a short delay and refresh device detail.
+- `lock()` does not call the cloud API. The guessed REST lock endpoint produced
+  bad live side effects and should be treated as the wrong function unless
+  later reverse engineering proves otherwise.
+- State is kept locked because the cloud REST API has a confirmed unlock action
+  but no confirmed authoritative locked-state read. This keeps Home Assistant's
+  normal lock card offering the known-good unlock action repeatedly.
 
 This gives Home Assistant the right control surface without pretending we know
 more than the API actually tells us.
@@ -106,7 +107,6 @@ Useful first sensors:
 - Online type
 - Firmware version
 - DSP version when parsed from firmware text
-- Screen timeout
 - Unlock type / app lock status as diagnostics
 
 ### Binary Sensors
@@ -114,21 +114,22 @@ Useful first sensors:
 Useful first binary sensors:
 
 - Online/offline
-- Notification enabled, if the API value is reliable
-- Battery display enabled
-- Call screen enabled
 
 ### Settings Entities
 
-Expose low-risk settings after the read-only entities are stable:
+Expose low-risk settings as native writable Home Assistant entities:
 
 - Screen light timeout as `NumberEntity`
-- Notification control as `SwitchEntity`
+- Main push and offline notifications as `SwitchEntity`
+- Activity, doorbell-call, and lock-event notification categories as
+  `SwitchEntity` controls over the app's `notify_ctrl` bitmask
 - Battery display as `SwitchEntity`
 - Call screen as `SwitchEntity`
 - Wet-play setting as `SwitchEntity`
-- Standby mode or target EV as diagnostic `NumberEntity` only if values are
-  understood well enough
+- Remote-unlock mode as `SwitchEntity` (`unlock_limit=0` means unlock anytime)
+- Standby mode as `SelectEntity`
+- Night vision target EV as `NumberEntity` when the device reports min/max EV
+  bounds
 
 Keep higher-risk or unclear operations out of the normal entity model:
 
@@ -239,8 +240,6 @@ risk.
 - Validate username/password login and device discovery.
 - Add `DataUpdateCoordinator`.
 - Add one `LockEntity` per door device.
-- Add one unlock `ButtonEntity` per door device for dashboard-friendly
-  one-shot unlock actions.
 - Add battery, RSSI, online, and firmware sensors.
 - Add online binary sensor.
 - Add diagnostics redacting token and full UID.
@@ -282,8 +281,9 @@ Outcome: Automations can react to XHome events without live P2P video.
 
 ### Phase 3: Safe Settings
 
-- Add entities for screen timeout, notification control, battery display, and
-  call-screen settings.
+- Add entities for screen timeout, notification controls, battery display,
+  weather forecast, call-screen, remote-unlock mode, standby mode, and target
+  EV settings.
 - Add tests for each setter.
 - Add options flow for polling intervals.
 

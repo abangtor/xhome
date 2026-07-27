@@ -50,6 +50,7 @@ from .helpers import (
     is_doorbell_event,
     media_url_from_event,
     media_url_from_item,
+    set_notify_category_enabled,
     string_value,
     unwrap_dict,
 )
@@ -207,16 +208,82 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
 
-    async def async_lock_device(self, uid: str) -> JSON:
-        """Lock a door device through the XHome cloud."""
+    async def async_set_push_enabled(self, uid: str, enabled: bool) -> JSON:
+        """Set the main XHome push notification switch."""
 
-        try:
-            return await self.hass.async_add_executor_job(self._lock_device, uid)
-        except XHomeAuthError as err:
-            self.client.token = None
-            raise HomeAssistantError("XHome authentication failed while locking") from err
-        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
-            raise HomeAssistantError(f"XHome lock failed: {err}") from err
+        return await self._async_update_device_setting("push notifications", self._set_push_enabled, uid, enabled)
+
+    async def async_set_offline_notifications(self, uid: str, enabled: bool) -> JSON:
+        """Set the XHome offline notification switch."""
+
+        return await self._async_update_device_setting(
+            "offline notifications",
+            self._set_offline_notifications,
+            uid,
+            enabled,
+        )
+
+    async def async_set_notification_category(self, uid: str, event_ids: tuple[int, ...], enabled: bool) -> JSON:
+        """Set one XHome notification category in the notify_ctrl mask."""
+
+        return await self._async_update_device_setting(
+            "notification category",
+            self._set_notification_category,
+            uid,
+            event_ids,
+            enabled,
+        )
+
+    async def async_set_battery_display(self, uid: str, enabled: bool) -> JSON:
+        """Set the door screen battery-display switch."""
+
+        return await self._async_update_device_setting(
+            "battery display",
+            self.client.set_battery_display,
+            uid,
+            enabled,
+        )
+
+    async def async_set_wet_play(self, uid: str, enabled: bool) -> JSON:
+        """Set the weather forecast voice/display switch."""
+
+        return await self._async_update_device_setting("weather forecast", self.client.set_wet_play, uid, enabled)
+
+    async def async_set_call_screen(self, uid: str, enabled: bool) -> JSON:
+        """Set whether a doorbell call wakes the screen."""
+
+        return await self._async_update_device_setting("call screen", self.client.set_call_screen, uid, enabled)
+
+    async def async_set_remote_unlock_anytime(self, uid: str, enabled: bool) -> JSON:
+        """Set whether remote unlock is allowed anytime or only after ringing."""
+
+        unlock_limit = 0 if enabled else 1
+        return await self._async_update_device_setting(
+            "remote unlock limit",
+            self.client.set_device_unlock_limit,
+            uid,
+            unlock_limit,
+        )
+
+    async def async_set_screen_timeout(self, uid: str, timeout_seconds: int) -> JSON:
+        """Set the door screen auto-off timeout."""
+
+        return await self._async_update_device_setting(
+            "screen timeout",
+            self.client.set_screen_light_timeout,
+            uid,
+            timeout_seconds,
+        )
+
+    async def async_set_standby_mode(self, uid: str, standby_mode: int) -> JSON:
+        """Set the XHome standby mode."""
+
+        return await self._async_update_device_setting("standby mode", self.client.set_standby_mode, uid, standby_mode)
+
+    async def async_set_target_ev(self, uid: str, target_ev: int) -> JSON:
+        """Set the night-vision target EV value."""
+
+        return await self._async_update_device_setting("night vision target EV", self.client.set_target_ev, uid, target_ev)
 
     async def async_poll_events(self, *, seed_only: bool = False) -> None:
         """Poll the XHome event endpoint and fire Home Assistant events."""
@@ -274,11 +341,77 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._ensure_login()
         return self.client.unlock_door(uid)
 
-    def _lock_device(self, uid: str) -> JSON:
-        """Synchronous lock helper."""
+    async def _async_update_device_setting(self, name: str, func: Any, *args: Any) -> JSON:
+        """Run a synchronous setting update and refresh coordinator data."""
+
+        try:
+            result = await self.hass.async_add_executor_job(self._call_device_setting, func, *args)
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError(f"XHome authentication failed while updating {name}") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            raise HomeAssistantError(f"XHome {name} update failed: {err}") from err
+
+        await self.async_request_refresh()
+        return result
+
+    def _call_device_setting(self, func: Any, *args: Any) -> JSON:
+        """Call a setting setter after ensuring cloud login."""
 
         self._ensure_login()
-        return self.client.lock_door(uid)
+        return func(*args)
+
+    def _set_push_enabled(self, uid: str, enabled: bool) -> JSON:
+        """Synchronous helper for the main push notification switch."""
+
+        data = self._device_for_setting(uid)
+        return self._update_device_push_fields(data, push=_flag(enabled))
+
+    def _set_offline_notifications(self, uid: str, enabled: bool) -> JSON:
+        """Synchronous helper for the offline notification switch."""
+
+        data = self._device_for_setting(uid)
+        return self._update_device_push_fields(data, ispush=_flag(enabled))
+
+    def _set_notification_category(self, uid: str, event_ids: tuple[int, ...], enabled: bool) -> JSON:
+        """Synchronous helper for the XHome notification category bitmask."""
+
+        data = self._device_for_setting(uid)
+        if data.device_id is None:
+            raise ValueError("XHome device id is unavailable")
+        current_mask = int_value(data.first("notify_ctrl", "notifyCtrl")) or 0
+        return self.client.set_notify_control(
+            data.device_id,
+            set_notify_category_enabled(current_mask, event_ids, enabled),
+        )
+
+    def _update_device_push_fields(
+        self,
+        data: XHomeDeviceRuntimeData,
+        *,
+        push: int | None = None,
+        ispush: int | None = None,
+    ) -> JSON:
+        """Update app-level push fields while preserving the other flag."""
+
+        if data.device_id is None:
+            raise ValueError("XHome device id is unavailable")
+
+        current_push = int_value(data.first("push"))
+        current_ispush = int_value(data.first("ispush"))
+        return self.client.update_device(
+            data.device_id,
+            name=data.name,
+            push=current_push if push is None else push,
+            ispush=current_ispush if ispush is None else ispush,
+        )
+
+    def _device_for_setting(self, uid: str) -> XHomeDeviceRuntimeData:
+        """Return current device runtime data or fail a setting update."""
+
+        if self.data is None or uid not in self.data.devices:
+            raise ValueError("XHome device is unavailable")
+        return self.data.devices[uid]
 
     async def _async_event_poll_tick(self, now: Any) -> None:
         """Handle a scheduled event polling tick."""
@@ -552,3 +685,7 @@ def _media_url_expired(media: XHomeLatestEventMedia) -> bool:
     """Return True when a signed media URL appears expired or nearly expired."""
 
     return media.exp_time is not None and media.exp_time <= int(time.time()) + 60
+
+
+def _flag(value: bool) -> int:
+    return 1 if value else 0

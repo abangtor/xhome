@@ -8,8 +8,8 @@ and door devices.
 This repository now contains the first Home Assistant project skeleton and the
 reverse-engineered REST API wrapper. The API client has offline tests; the Home
 Assistant integration has an initial config flow, coordinator, lock entity,
-sensors, binary sensors, latest event image entity, diagnostics, and a refresh
-service.
+sensors, binary sensors, writable setting entities, latest event image entity,
+diagnostics, and a refresh service.
 
 The first supported path will be normal username/password auth only. Google,
 WeChat, native P2P video/control, BLE provisioning, and temporary password
@@ -19,12 +19,11 @@ generation are out of scope for the first Home Assistant version.
 
 Expose XHome door devices cleanly in Home Assistant:
 
-- Door lock/unlock through a native `LockEntity`
-- One-shot unlock button for dashboard-friendly door control
+- Door unlock through a native `LockEntity`
 - Battery, RSSI, online, firmware, and diagnostic sensors
+- Writable controls for routine device settings
 - Latest event image through a native Home Assistant image entity
 - Event/media polling where the cloud REST API supports it
-- Safe device settings after core state and unlock are stable
 
 ## Planned Structure
 
@@ -111,9 +110,22 @@ Do not commit credentials, tokens, full device UIDs, or captured private media.
 The integration must store credentials through Home Assistant config entries or
 secrets and redact sensitive values from logs and diagnostics.
 
-Door lock/unlock operations are sensitive. They should be exposed through Home
-Assistant's standard `lock.lock` and `lock.unlock` paths rather than second
-generic services.
+Door unlock operations are sensitive. The integration exposes the known-good
+cloud unlock call through Home Assistant's standard `lock.unlock` path. The
+cloud REST API does not expose a reliable locked-state read, and the guessed
+cloud lock endpoint had bad live side effects, so `lock.lock` is intentionally
+not wired to a cloud call.
+
+## Settings
+
+Routine XHome settings are exposed as writable Home Assistant entities where the
+Android app uses simple REST setters:
+
+- Push, offline, activity, doorbell-call, and lock-event notification switches
+- Battery display, weather forecast, call screen, and remote-unlock mode switches
+- Screen timeout number using the app's 5-60 second range
+- Night vision target EV number when the device reports EV bounds
+- Standby mode select with normal standby and trigger mode
 
 ## Events
 
@@ -161,8 +173,7 @@ P2P stack and is still out of scope for this REST-first integration.
 ## Development Roadmap
 
 1. Harden the config flow and coordinator with Home Assistant test coverage.
-2. Test setup against a real Home Assistant instance without triggering lock/unlock.
-3. Manually test `lock.lock` and `lock.unlock` only when explicitly requested.
+2. Test setup against a real Home Assistant instance without triggering unlock.
+3. Manually test `lock.unlock` only when explicitly requested.
 4. Add event/media polling.
-5. Add safe settings entities.
-6. Add hassfest, Home Assistant runtime tests, and release polish.
+5. Add hassfest, Home Assistant runtime tests, and release polish.

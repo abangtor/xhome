@@ -12,7 +12,6 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -34,18 +33,6 @@ BINARY_SENSORS: tuple[XHomeBinarySensorEntityDescription, ...] = (
         translation_key="online",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         value_fn=lambda data: _online_value(data),
-    ),
-    XHomeBinarySensorEntityDescription(
-        key="battery_display",
-        translation_key="battery_display",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: bool_value(data.first("bat_display_en", "battery_display", "batteryDisplay")),
-    ),
-    XHomeBinarySensorEntityDescription(
-        key="call_screen",
-        translation_key="call_screen",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: bool_value(data.first("call_screen_on", "call_screen", "callScreen")),
     ),
 )
 

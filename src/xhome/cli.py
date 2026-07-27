@@ -178,11 +178,6 @@ def build_parser() -> argparse.ArgumentParser:
     unlock_door.add_argument("--yes", action="store_true", help="Confirm that you really want to trigger the door unlock")
     unlock_door.set_defaults(func=cmd_unlock, unlock_method="unlock_door")
 
-    lock_door = subparsers.add_parser("lock-door", help="Lock a door device via the cloud API")
-    lock_door.add_argument("uid")
-    lock_door.add_argument("--yes", action="store_true", help="Confirm that you really want to trigger the door lock")
-    lock_door.set_defaults(func=cmd_lock)
-
     friends = subparsers.add_parser("friends", help="List share friends")
     friends.set_defaults(func=lambda args: logged_in_client(args).list_share_friends())
 
@@ -345,12 +340,6 @@ def cmd_unlock(args: argparse.Namespace) -> Any:
     client = logged_in_client(args)
     method = getattr(client, args.unlock_method)
     return method(args.uuid)
-
-
-def cmd_lock(args: argparse.Namespace) -> Any:
-    if not args.yes:
-        raise SystemExit("Refusing to lock without --yes")
-    return logged_in_client(args).lock_door(args.uid)
 
 
 def cmd_group_shares(args: argparse.Namespace) -> Any:

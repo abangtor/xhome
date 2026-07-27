@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -58,14 +58,6 @@ SENSORS: tuple[XHomeSensorEntityDescription, ...] = (
         value_fn=lambda data: string_value(
             data.first("version", "firmware", "firmware_version", "current_version", "currentVersion")
         ),
-    ),
-    XHomeSensorEntityDescription(
-        key="screen_timeout",
-        translation_key="screen_timeout",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: int_value(data.first("screenon_timeout", "screen_on_timeout", "screenTimeout")),
     ),
 )
 

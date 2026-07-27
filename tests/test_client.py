@@ -107,18 +107,6 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["time"], 123)
         self.assertEqual(kwargs["json"]["sign"], "e70c099b2659269d70dc28450efab4e48cfd5509")
 
-    def test_lock_door_body_uses_uid_and_signed_timestamp(self):
-        session = FakeSession({"message": "ok"})
-        client = XHomeClient(token="tok", session=session)
-        client.lock_door("abc", timestamp=123)
-
-        args, kwargs = session.calls[0]
-        self.assertEqual(args[0], "POST")
-        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/door/lock")
-        self.assertEqual(kwargs["json"]["uid"], "abc")
-        self.assertEqual(kwargs["json"]["time"], 123)
-        self.assertEqual(kwargs["json"]["sign"], "e70c099b2659269d70dc28450efab4e48cfd5509")
-
     def test_add_device_share_uses_idcode_header_and_uuid(self):
         session = FakeSession({"message": "ok"})
         client = XHomeClient(token="tok", session=session)
@@ -198,6 +186,61 @@ class ClientTests(unittest.TestCase):
         args, kwargs = session.calls[0]
         self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/device/oss/list")
         self.assertEqual(kwargs["json"], {"uuid": "abc", "event_guid": "guid-1"})
+
+    def test_device_setting_setter_bodies(self):
+        cases = (
+            (
+                lambda client: client.set_screen_light_timeout("abc", 30),
+                "https://chniot.lancens.com:6448/v1/api/device/screen/light",
+                {"uid": "abc", "screenon_timeout": 30},
+            ),
+            (
+                lambda client: client.set_battery_display("abc", True),
+                "https://chniot.lancens.com:6448/v1/api/device/battery/status",
+                {"uuid": "abc", "bat_display_en": 1},
+            ),
+            (
+                lambda client: client.set_wet_play("abc", False),
+                "https://chniot.lancens.com:6448/v1/api/device/wet_play/status",
+                {"uuid": "abc", "wet_play": 0},
+            ),
+            (
+                lambda client: client.set_call_screen("abc", True),
+                "https://chniot.lancens.com:6448/v1/api/device/call/screen/status",
+                {"uuid": "abc", "call_screen_on": 1},
+            ),
+            (
+                lambda client: client.set_standby_mode("abc", 1),
+                "https://chniot.lancens.com:6448/v1/api/device/standby_mode/status",
+                {"uid": "abc", "standby_mode": 1},
+            ),
+            (
+                lambda client: client.set_target_ev("abc", 42),
+                "https://chniot.lancens.com:6448/v1/api/device/target/ev",
+                {"uid": "abc", "target_ev": 42},
+            ),
+            (
+                lambda client: client.set_device_unlock_limit("abc", 0),
+                "https://chniot.lancens.com:6448/v1/api/device/unlock/status",
+                {"uuid": "abc", "unlock_limit": 0},
+            ),
+            (
+                lambda client: client.set_notify_control(123, 65),
+                "https://chniot.lancens.com:6448/v1/api/device/notify_ctrl/123",
+                {"notify_ctrl": 65},
+            ),
+        )
+
+        for call, url, body in cases:
+            with self.subTest(url=url):
+                session = FakeSession({"message": "ok"})
+                client = XHomeClient(token="tok", session=session)
+                call(client)
+
+                args, kwargs = session.calls[0]
+                self.assertEqual(args[0], "POST")
+                self.assertEqual(args[1], url)
+                self.assertEqual(kwargs["json"], body)
 
     def test_result_status_200_is_success(self):
         session = FakeSession({"message": "success", "resultStatus": 200, "resultData": {"ok": True}})

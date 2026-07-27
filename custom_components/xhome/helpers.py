@@ -114,6 +114,7 @@ EVENT_TEXT_KIND_MARKERS = (
 )
 MEDIA_LIST_KEYS = ("data", "files", "list", "media", "mediaList", "rows", "result")
 MEDIA_URL_KEYS = ("oss_url", "m_oss_url", "img", "image", "image_url", "imageUrl", "url")
+NOTIFY_MASK_SENTINEL = 1
 
 
 def unwrap_dict(payload: JSON | None) -> dict[str, Any]:
@@ -210,6 +211,33 @@ def bool_value(value: Any) -> bool | None:
         if normalized in {"0", "false", "no", "off", "offline"}:
             return False
     return None
+
+
+def notify_category_enabled(mask: int | None, event_ids: Iterable[int]) -> bool:
+    """Return whether every XHome notification category is enabled.
+
+    The app stores disabled notification categories in a bitmask. Bit 0 marks
+    the mask as explicit; each disabled category uses bit ``event_id + 1``.
+    A missing/zero mask means the app treats all categories as enabled.
+    """
+
+    if mask is None or mask & NOTIFY_MASK_SENTINEL == 0:
+        return True
+    return all(mask & _notify_event_bit(event_id) == 0 for event_id in event_ids)
+
+
+def set_notify_category_enabled(mask: int | None, event_ids: Iterable[int], enabled: bool) -> int:
+    """Return a new XHome notification bitmask with categories toggled."""
+
+    new_mask = mask or NOTIFY_MASK_SENTINEL
+    new_mask |= NOTIFY_MASK_SENTINEL
+    for event_id in event_ids:
+        bit = _notify_event_bit(event_id)
+        if enabled:
+            new_mask &= ~bit
+        else:
+            new_mask |= bit
+    return new_mask
 
 
 def event_records(payload: JSON | None) -> list[dict[str, Any]]:
@@ -502,3 +530,9 @@ def _hex_int(value: Any) -> int | None:
         return int(text, 16)
     except ValueError:
         return None
+
+
+def _notify_event_bit(event_id: int) -> int:
+    if event_id < 0 or event_id > 30:
+        raise ValueError("event_id must be between 0 and 30")
+    return 1 << (event_id + 1)

@@ -41,11 +41,6 @@
         "name": "Door lock"
       }
     },
-    "button": {
-      "unlock": {
-        "name": "Unlock"
-      }
-    },
     "sensor": {
       "battery": {
         "name": "Battery"
@@ -59,9 +54,6 @@
       "firmware": {
         "name": "Firmware"
       },
-      "screen_timeout": {
-        "name": "Screen timeout"
-      },
       "last_event": {
         "name": "Last event"
       }
@@ -69,12 +61,48 @@
     "binary_sensor": {
       "online": {
         "name": "Online"
+      }
+    },
+    "switch": {
+      "push_notifications": {
+        "name": "Push notifications"
+      },
+      "offline_notifications": {
+        "name": "Offline notifications"
+      },
+      "activity_notifications": {
+        "name": "Activity notifications"
+      },
+      "doorbell_call_notifications": {
+        "name": "Doorbell call notifications"
+      },
+      "lock_event_notifications": {
+        "name": "Lock event notifications"
       },
       "battery_display": {
         "name": "Battery display"
       },
+      "weather_forecast": {
+        "name": "Weather forecast"
+      },
       "call_screen": {
         "name": "Call screen"
+      },
+      "remote_unlock_anytime": {
+        "name": "Remote unlock anytime"
+      }
+    },
+    "select": {
+      "standby_mode": {
+        "name": "Standby mode"
+      }
+    },
+    "number": {
+      "screen_timeout": {
+        "name": "Screen timeout"
+      },
+      "night_vision_target_ev": {
+        "name": "Night vision target EV"
       }
     },
     "image": {
