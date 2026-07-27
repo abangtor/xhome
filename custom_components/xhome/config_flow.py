@@ -6,7 +6,6 @@ from typing import Any
 
 import requests
 import voluptuous as vol
-from xhome import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -14,6 +13,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
+from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .const import (
     CONF_EVENT_SCAN_INTERVAL,
     CONF_REGION,

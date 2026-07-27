@@ -24,4 +24,4 @@ jobs:
         run: PYTHONPATH=src:. python -m unittest discover -s tests
 
       - name: Syntax-check integration
-        run: python -m py_compile custom_components/xhome/*.py src/xhome/*.py tests/*.py
+        run: python -m py_compile custom_components/xhome/*.py custom_components/xhome/api/*.py src/xhome/*.py tests/*.py

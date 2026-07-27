@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Iterable
 from typing import Any
 
-from xhome.client import JSON, unwrap_response
+from .api.client import JSON, unwrap_response
 
 
 def unwrap_dict(payload: JSON | None) -> dict[str, Any]:
@@ -103,4 +103,3 @@ def bool_value(value: Any) -> bool | None:
         if normalized in {"0", "false", "no", "off", "offline"}:
             return False
     return None
-

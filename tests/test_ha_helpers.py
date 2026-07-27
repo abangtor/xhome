@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
+import types
 import unittest
 
 HELPERS_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "xhome" / "helpers.py"
-spec = importlib.util.spec_from_file_location("xhome_ha_helpers", HELPERS_PATH)
+
+COMPONENT_PATH = HELPERS_PATH.parent
+CUSTOM_COMPONENTS_PATH = COMPONENT_PATH.parent
+
+sys.modules.setdefault("custom_components", types.ModuleType("custom_components"))
+sys.modules["custom_components"].__path__ = [str(CUSTOM_COMPONENTS_PATH)]
+package = types.ModuleType("custom_components.xhome")
+package.__path__ = [str(COMPONENT_PATH)]
+sys.modules.setdefault("custom_components.xhome", package)
+
+spec = importlib.util.spec_from_file_location("custom_components.xhome.helpers", HELPERS_PATH)
 helpers = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(helpers)

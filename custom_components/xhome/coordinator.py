@@ -8,15 +8,14 @@ import logging
 from typing import Any
 
 import requests
-from xhome import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
-from xhome.client import JSON
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
+from .api.client import JSON
 from .const import (
     CONF_REGION,
     CONF_SCAN_INTERVAL,
@@ -175,4 +174,3 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             LOGGER.debug("Skipping optional XHome %s payload: %s", name, err)
             return {}
-

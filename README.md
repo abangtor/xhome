@@ -28,6 +28,7 @@ Expose XHome door devices cleanly in Home Assistant:
 ```text
 .
 ├── custom_components/xhome/      # Home Assistant custom integration
+│   ├── api/                      # Vendored runtime API client for HACS installs
 │   └── translations/             # UI strings for config/options flows
 ├── docs/                         # Architecture notes and API documentation
 ├── scripts/                      # Local development helpers
@@ -38,9 +39,38 @@ Expose XHome door devices cleanly in Home Assistant:
 
 ## Local Development
 
-Install the Python package into a Home Assistant development environment, then
-copy or symlink `custom_components/xhome` into Home Assistant's
-`custom_components` directory.
+### HACS Custom Repository
+
+This repository can be installed as a HACS custom repository.
+
+1. Open HACS in Home Assistant.
+2. Open the three-dot menu and choose **Custom repositories**.
+3. Add `https://github.com/abangtor/xhome`.
+4. Select category **Integration**.
+5. Install **XHome**.
+6. Restart Home Assistant.
+7. Add the integration from **Settings** -> **Devices & services** -> **Add integration** -> **XHome**.
+
+The integration vendors its XHome REST API client under
+`custom_components/xhome/api`, so a HACS install does not need a separate
+`pip install -e .` step.
+
+### Manual Install
+
+Copy `custom_components/xhome` into the Home Assistant config directory:
+
+```text
+config/
+└── custom_components/
+    └── xhome/
+```
+
+Restart Home Assistant and add the integration from the UI.
+
+### Python Development
+
+Install the standalone API package into a development environment when working
+on the CLI or package tests:
 
 ```bash
 python3 -m venv .venv
@@ -57,9 +87,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ## Architecture
 
 The integration should stay thin. Home Assistant code should handle config
-entries, entities, polling, diagnostics, and services. The reusable `xhome`
-Python package should handle login, signing, request/response handling, and the
-XHome cloud REST endpoints.
+entries, entities, polling, diagnostics, and services. For HACS installation,
+the runtime API client is vendored under `custom_components/xhome/api`. The
+standalone `src/xhome` package remains useful for CLI work, tests, and a future
+published package if we decide to split it later.
 
 The first Home Assistant integration should use `DataUpdateCoordinator` and call
 the synchronous API client through Home Assistant executor jobs. A sidecar or
@@ -82,4 +113,4 @@ Assistant's standard `lock.unlock` path rather than a second generic service.
 3. Manually test `lock.unlock` once only when explicitly requested.
 4. Add event/media polling.
 5. Add safe settings entities.
-6. Add HACS/hassfest/CI packaging.
+6. Add hassfest, Home Assistant runtime tests, and release polish.
