@@ -116,6 +116,53 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["idcode"], "1")
         self.assertEqual(kwargs["json"], {"uuid": "abc", "entry": "app"})
 
+    def test_lock_member_methods_use_member_endpoints(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.list_lock_members("abc")
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/users/device/member/list")
+        self.assertEqual(kwargs["json"], {"uuid": "abc"})
+
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.upsert_lock_member(
+            "abc",
+            remarks="Torsten",
+            avatar="",
+            lock_type=1,
+            event_user_id=2,
+            member_type=3,
+            model=4,
+            key_id=5,
+        )
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/users/device/member/update/new")
+        self.assertEqual(
+            kwargs["json"],
+            {
+                "uuid": "abc",
+                "remarks": "Torsten",
+                "avatar": "",
+                "lock_type": 1,
+                "event_user_id": 2,
+                "member_type": 3,
+                "model": 4,
+                "key_id": 5,
+            },
+        )
+
+    def test_update_event_member_body(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.update_event_member("abc", event_user_id=2, member_type=3, remarks="Torsten")
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/users/event/member")
+        self.assertEqual(kwargs["json"], {"uid": "abc", "event_user_id": 2, "member_type": 3, "remarks": "Torsten"})
+
     def test_list_auth_uses_uuid_and_app_entry_query(self):
         session = FakeSession({"message": "ok"})
         client = XHomeClient(token="tok", session=session)
@@ -124,10 +171,85 @@ class ClientTests(unittest.TestCase):
         _, kwargs = session.calls[0]
         self.assertEqual(kwargs["params"], {"uuid": "abc", "entry": "app"})
 
+    def test_add_temporary_password_raw_body(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.add_temporary_password_raw(
+            "abc",
+            name="Cleaner",
+            data="encoded",
+            rand_key="1234567890abcdef",
+            begin_time=10,
+            end_time=20,
+            start_time=30,
+            stop_time=40,
+            total_times=1,
+            week=127,
+        )
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/device/iviews/auth/add")
+        self.assertEqual(
+            kwargs["json"],
+            {
+                "uuid": "abc",
+                "entry": "app",
+                "name": "Cleaner",
+                "begin_time": 10,
+                "end_time": 20,
+                "start_time": 30,
+                "stop_time": 40,
+                "total_times": 1,
+                "week": 127,
+                "user_type": 2,
+                "auth_type": 1,
+                "data": "encoded",
+                "rand_key": "1234567890abcdef",
+            },
+        )
+
+    def test_ble_lock_device_methods(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.add_ble_lock_device(
+            name="BLE Lock",
+            code="123456",
+            mac="aa:bb:cc",
+            longitude=101.1,
+            latitude=3.1,
+            time_zone=8,
+            iviews_func=7,
+            blename="BLE-123",
+        )
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/user/add/blelock/device")
+        self.assertEqual(
+            kwargs["json"],
+            {
+                "name": "BLE Lock",
+                "code": "123456",
+                "mac": "aa:bb:cc",
+                "longitude": "101.1",
+                "latitude": "3.1",
+                "time_zone": 8,
+                "iviews_func": 7,
+                "blename": "BLE-123",
+            },
+        )
+
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.new_ble_lock_device("abc", 9)
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/user/blelock/device/new")
+        self.assertEqual(kwargs["json"], {"uuid": "abc", "model": 9})
+
     def test_delete_auth_formats_list_ids(self):
         session = FakeSession({"message": "ok"})
         client = XHomeClient(token="tok", session=session)
-        client.delete_auth("abc", [1, 2])
+        client.delete_temporary_password("abc", [1, 2])
 
         _, kwargs = session.calls[0]
         self.assertEqual(kwargs["json"], {"uuid": "abc", "entry": "app", "ids": "1,2"})
@@ -223,6 +345,11 @@ class ClientTests(unittest.TestCase):
                 lambda client: client.set_device_unlock_limit("abc", 0),
                 "https://chniot.lancens.com:6448/v1/api/device/unlock/status",
                 {"uuid": "abc", "unlock_limit": 0},
+            ),
+            (
+                lambda client: client.set_remote_unlock_limit("abc", 1),
+                "https://chniot.lancens.com:6448/v1/api/device/unlock/status",
+                {"uuid": "abc", "unlock_limit": 1},
             ),
             (
                 lambda client: client.set_notify_control(123, 65),

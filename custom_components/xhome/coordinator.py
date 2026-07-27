@@ -317,7 +317,39 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
     async def async_set_target_ev(self, uid: str, target_ev: int) -> JSON:
         """Set the night-vision target EV value."""
 
-        return await self._async_update_device_setting("night vision target EV", self.client.set_target_ev, uid, target_ev)
+        return await self._async_update_device_setting(
+            "night vision target EV",
+            self.client.set_target_ev,
+            uid,
+            target_ev,
+        )
+
+    async def async_call_client(
+        self,
+        name: str,
+        method_name: str,
+        *args: Any,
+        refresh: bool = False,
+        **kwargs: Any,
+    ) -> JSON:
+        """Call a synchronous API client method through Home Assistant's executor."""
+
+        try:
+            result = await self.hass.async_add_executor_job(
+                self._call_client_method,
+                method_name,
+                args,
+                kwargs,
+            )
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError(f"XHome authentication failed while calling {name}") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            raise HomeAssistantError(f"XHome {name} failed: {err}") from err
+
+        if refresh:
+            await self.async_request_refresh()
+        return result
 
     async def async_poll_events(self, *, seed_only: bool = False) -> None:
         """Poll the XHome event endpoint and fire Home Assistant events."""
@@ -439,6 +471,13 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         self._ensure_login()
         return func(*args)
+
+    def _call_client_method(self, method_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> JSON:
+        """Call one API client method after ensuring cloud login."""
+
+        self._ensure_login()
+        method = getattr(self.client, method_name)
+        return method(*args, **kwargs)
 
     def _set_push_enabled(self, uid: str, enabled: bool) -> JSON:
         """Synchronous helper for the main push notification switch."""

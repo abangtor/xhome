@@ -284,10 +284,14 @@ Outcome: Automations can react to XHome events without live P2P video.
 - Add entities for screen timeout, notification controls, battery display,
   weather forecast, call-screen, remote-unlock mode, standby mode, and target
   EV settings.
+- Add Home Assistant services for the recovered REST API helpers that do not
+  fit naturally as entities: lock members, event member labels, raw
+  temporary-password/auth records, app lock status, and direct setting setters.
 - Add tests for each setter.
 - Add options flow for polling intervals.
 
-Outcome: Routine device settings are controllable from Home Assistant.
+Outcome: Routine device settings and REST-backed member/auth metadata are
+controllable from Home Assistant.
 
 ### Phase 4: Packaging And Hardening
 
@@ -333,6 +337,8 @@ Outcome: richer device support, but with much higher complexity.
   out of scope for the first integration.
 - The device currently reports `gms=0`; account-wide GMS list is empty, and
   device/model GMS reads returned `10009` in live testing.
-- Temporary password generation still needs deeper reverse engineering.
+- Temporary password/auth list, rename, delete, and raw-add submission are
+  implemented. Human-friendly temporary password generation still needs the
+  native `IVIEWSPassword`/`IVIEWSPSD` encoder or a reimplementation.
 - Region must be validated by login. The tested account is in the `usa` API
   region even though the physical location is Malaysia.

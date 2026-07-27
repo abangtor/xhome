@@ -235,6 +235,15 @@ class XHomeClient:
     def set_device_unlock_limit(self, uuid: str, unlock_limit: int) -> JSON:
         return self.post("v1/api/device/unlock/status", {"uuid": uuid, "unlock_limit": unlock_limit})
 
+    def set_remote_unlock_limit(self, uuid: str, unlock_limit: int) -> JSON:
+        """Set the app's per-device remote-unlock limit.
+
+        The Android UI appears to use ``0`` for remote unlock anytime and ``1``
+        for remote unlock only after a doorbell/call event.
+        """
+
+        return self.set_device_unlock_limit(uuid, unlock_limit)
+
     def get_app_lock_status(self, brand: str = "python", model: str = "xhome-api", sdk: int = 35) -> JSON:
         return self.get("v1/api/app/lock/status", params={"brand": brand.lower(), "model": model.lower(), "sdk": sdk})
 
@@ -324,8 +333,18 @@ class XHomeClient:
     def list_all_device_members(self) -> JSON:
         return self.get("v1/api/device/member/list/all")
 
+    def list_all_lock_members(self) -> JSON:
+        """Return all known lock/member records for the account."""
+
+        return self.list_all_device_members()
+
     def list_device_members(self, uuid: str) -> JSON:
         return self.post("v1/api/users/device/member/list", {"uuid": uuid})
+
+    def list_lock_members(self, uuid: str) -> JSON:
+        """Return lock/member records for one device."""
+
+        return self.list_device_members(uuid)
 
     def upsert_member(
         self,
@@ -353,6 +372,14 @@ class XHomeClient:
             return self.post("v1/api/users/device/member/update/new", body)
         return self.post("v1/api/users/device/member/update", body)
 
+    def upsert_lock_member(self, uuid: str, **fields: Any) -> JSON:
+        """Add or update a lock member.
+
+        This is a semantic alias for the Android app's member update endpoint.
+        """
+
+        return self.upsert_member(uuid, **fields)
+
     def update_event_member(self, uid: str, event_user_id: int, member_type: int, remarks: str) -> JSON:
         return self.post(
             "v1/api/users/event/member",
@@ -369,14 +396,103 @@ class XHomeClient:
         body = {"uuid": uuid, "entry": "app", **fields}
         return self.post("v1/api/device/iviews/auth/add", body)
 
+    def list_temporary_passwords(self, uuid: str, entry: str = "app") -> JSON:
+        """Return temporary-password/auth records for one device."""
+
+        return self.list_auth(uuid, entry=entry)
+
+    def list_all_temporary_passwords(self, entry: str = "app") -> JSON:
+        """Return temporary-password/auth records for all devices."""
+
+        return self.list_all_auth(entry=entry)
+
+    def add_temporary_password_raw(
+        self,
+        uuid: str,
+        *,
+        name: str,
+        data: str,
+        rand_key: str,
+        begin_time: int = 0,
+        end_time: int = 0,
+        start_time: int = 0,
+        stop_time: int = 0,
+        total_times: int = 0,
+        week: int = 0,
+        user_type: int = 2,
+        auth_type: int = 1,
+        entry: str = "app",
+    ) -> JSON:
+        """Submit a pre-encoded temporary password/auth record.
+
+        The Android app generates ``data`` with the native ``IVIEWSPassword``
+        library. This client can submit an already encoded blob, but it cannot
+        generate that blob without the native algorithm.
+        """
+
+        return self.add_auth_raw(
+            uuid,
+            entry=entry,
+            name=name,
+            begin_time=begin_time,
+            end_time=end_time,
+            start_time=start_time,
+            stop_time=stop_time,
+            total_times=total_times,
+            week=week,
+            user_type=user_type,
+            auth_type=auth_type,
+            data=data,
+            rand_key=rand_key,
+        )
+
     def update_auth_name(self, uuid: str, ids: str | int | list[int], name: str, entry: str = "app") -> JSON:
         return self.post(
             "v1/api/device/iviews/auth/update",
             {"uuid": uuid, "entry": entry, "ids": _ids(ids), "name": name},
         )
 
+    def rename_temporary_password(self, uuid: str, ids: str | int | list[int], name: str, entry: str = "app") -> JSON:
+        """Rename one or more temporary-password/auth records."""
+
+        return self.update_auth_name(uuid, ids, name, entry=entry)
+
     def delete_auth(self, uuid: str, ids: str | int | list[int], entry: str = "app") -> JSON:
         return self.post("v1/api/device/iviews/auth/del", {"uuid": uuid, "entry": entry, "ids": _ids(ids)})
+
+    def delete_temporary_password(self, uuid: str, ids: str | int | list[int], entry: str = "app") -> JSON:
+        """Delete one or more temporary-password/auth records."""
+
+        return self.delete_auth(uuid, ids, entry=entry)
+
+    def add_ble_lock_device(
+        self,
+        *,
+        name: str,
+        code: str,
+        mac: str,
+        longitude: str | float,
+        latitude: str | float,
+        time_zone: int,
+        iviews_func: int,
+        blename: str,
+    ) -> JSON:
+        return self.post(
+            "v1/api/user/add/blelock/device",
+            {
+                "name": name,
+                "code": code,
+                "mac": mac,
+                "longitude": str(longitude),
+                "latitude": str(latitude),
+                "time_zone": time_zone,
+                "iviews_func": iviews_func,
+                "blename": blename,
+            },
+        )
+
+    def new_ble_lock_device(self, uuid: str, model: int) -> JSON:
+        return self.post("v1/api/user/blelock/device/new", {"uuid": uuid, "model": model})
 
     def get_gms_list(self, uuid: str, model: int, language: str = "en") -> JSON:
         return self.post("v1/api/app/device/gms/list", {"uuid": uuid, "model": model, "language": language})

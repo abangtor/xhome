@@ -1,3 +1,384 @@
 refresh:
   name: Refresh
   description: Refresh XHome cloud data for this integration.
+
+get_screen_light_config:
+  name: Get screen light config
+  description: Return the screen-light configuration for one XHome device.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        text:
+
+set_screen_light_timeout:
+  name: Set screen light timeout
+  description: Set the device screen auto-off timeout in seconds.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    timeout_seconds:
+      required: true
+      selector:
+        number:
+          min: 5
+          max: 60
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+set_battery_display:
+  name: Set battery display
+  description: Enable or disable battery display on the device screen.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    enabled:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
+set_weather_forecast:
+  name: Set weather forecast
+  description: Enable or disable the XHome weather forecast display/voice setting.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    enabled:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
+set_call_screen:
+  name: Set call screen
+  description: Enable or disable waking the screen for a doorbell call.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    enabled:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
+set_standby_mode:
+  name: Set standby mode
+  description: Set the raw XHome standby mode value.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    standby_mode:
+      required: true
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+set_target_ev:
+  name: Set target EV
+  description: Set the night-vision target EV value.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    target_ev:
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+set_remote_unlock_limit:
+  name: Set remote unlock limit
+  description: Set the raw per-device remote-unlock limit value.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    unlock_limit:
+      required: true
+      selector:
+        number:
+          min: 0
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+get_app_lock_status:
+  name: Get app lock status
+  description: Return XHome app lock/unlock status for a brand/model/sdk tuple.
+  fields:
+    brand:
+      default: python
+      selector:
+        text:
+    model:
+      default: xhome-api
+      selector:
+        text:
+    sdk:
+      default: 35
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+set_unlock_type:
+  name: Set unlock type
+  description: Set the account-level XHome unlock type value.
+  fields:
+    unlock_type:
+      required: true
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+list_lock_members:
+  name: List lock members
+  description: Return lock/member records for one device, or all records if uid is omitted.
+  fields:
+    uid:
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        text:
+
+upsert_lock_member:
+  name: Upsert lock member
+  description: Add or update a lock/member record.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    remarks:
+      required: true
+      selector:
+        text:
+    avatar:
+      selector:
+        text:
+    lock_type:
+      default: 0
+      selector:
+        number:
+          mode: box
+    event_user_id:
+      default: 0
+      selector:
+        number:
+          mode: box
+    member_type:
+      default: 0
+      selector:
+        number:
+          mode: box
+    model:
+      default: 0
+      selector:
+        number:
+          mode: box
+    key_id:
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      selector:
+        text:
+
+update_event_member:
+  name: Update event member
+  description: Assign a display name/member type to an event user id.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    event_user_id:
+      required: true
+      selector:
+        number:
+          mode: box
+    member_type:
+      required: true
+      selector:
+        number:
+          mode: box
+    remarks:
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        text:
+
+list_temporary_passwords:
+  name: List temporary passwords
+  description: Return temporary-password/auth records for one device, or all records if uid is omitted.
+  fields:
+    uid:
+      selector:
+        text:
+    entry:
+      default: app
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        text:
+
+add_temporary_password_raw:
+  name: Add raw temporary password
+  description: Submit a temporary-password/auth record with pre-encoded native data.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    name:
+      required: true
+      selector:
+        text:
+    data:
+      required: true
+      selector:
+        text:
+    rand_key:
+      required: true
+      selector:
+        text:
+    begin_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    end_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    start_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    stop_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    total_times:
+      default: 0
+      selector:
+        number:
+          mode: box
+    week:
+      default: 0
+      selector:
+        number:
+          mode: box
+    user_type:
+      default: 2
+      selector:
+        number:
+          mode: box
+    auth_type:
+      default: 1
+      selector:
+        number:
+          mode: box
+    entry:
+      default: app
+      selector:
+        text:
+    confirm:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
+rename_temporary_password:
+  name: Rename temporary password
+  description: Rename one or more temporary-password/auth records.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    ids:
+      required: true
+      selector:
+        text:
+    name:
+      required: true
+      selector:
+        text:
+    entry:
+      default: app
+      selector:
+        text:
+    config_entry_id:
+      selector:
+        text:
+
+delete_temporary_password:
+  name: Delete temporary password
+  description: Delete one or more temporary-password/auth records.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    ids:
+      required: true
+      selector:
+        text:
+    entry:
+      default: app
+      selector:
+        text:
+    confirm:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:

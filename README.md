@@ -9,11 +9,11 @@ This repository now contains the first Home Assistant project skeleton and the
 reverse-engineered REST API wrapper. The API client has offline tests; the Home
 Assistant integration has an initial config flow, coordinator, lock entity,
 sensors, binary sensors, writable setting entities, latest event image entity,
-diagnostics, and a refresh service.
+diagnostics, API helper services, and a refresh service.
 
 The first supported path will be normal username/password auth only. Google,
-WeChat, native P2P video/control, BLE provisioning, and temporary password
-generation are out of scope for the first Home Assistant version.
+WeChat, native P2P video/control, BLE provisioning, and native temporary
+password generation are out of scope for the first Home Assistant version.
 
 ## Goal
 
@@ -21,7 +21,8 @@ Expose XHome door devices cleanly in Home Assistant:
 
 - Door unlock through a native `LockEntity`
 - Battery, RSSI, online, firmware, and diagnostic sensors
-- Writable controls for routine device settings
+- Writable controls for routine device settings and remote-unlock configuration
+- API helper services for lock members and temporary-password/auth records
 - Latest event image through a native Home Assistant image entity
 - Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
@@ -127,6 +128,40 @@ Android app uses simple REST setters:
 - Screen timeout number using the app's 5-60 second range
 - Night vision target EV number when the device reports EV bounds
 - Standby mode select with normal standby and trigger mode
+
+The same REST setters are also exposed as services for automation or Developer
+Tools use:
+
+- `xhome.get_screen_light_config`
+- `xhome.set_screen_light_timeout`
+- `xhome.set_battery_display`
+- `xhome.set_weather_forecast`
+- `xhome.set_call_screen`
+- `xhome.set_standby_mode`
+- `xhome.set_target_ev`
+- `xhome.set_remote_unlock_limit`
+- `xhome.get_app_lock_status`
+- `xhome.set_unlock_type`
+
+## Lock Members And Temporary Passwords
+
+The REST endpoints for lock members and temporary-password/auth records are
+implemented in the Python client and exposed as Home Assistant services:
+
+- `xhome.list_lock_members`
+- `xhome.upsert_lock_member`
+- `xhome.update_event_member`
+- `xhome.list_temporary_passwords`
+- `xhome.add_temporary_password_raw`
+- `xhome.rename_temporary_password`
+- `xhome.delete_temporary_password`
+
+`add_temporary_password_raw` intentionally accepts only an already encoded
+`data` blob and `rand_key`. The Android app creates that `data` value with the
+native `IVIEWSPassword`/`IVIEWSPSD` library, which is not present in the base
+APK we have. Creating human-friendly temporary passwords remains blocked until
+that native encoder is recovered or reimplemented. Access-changing services such
+as raw temporary-password add/delete require `confirm: true`.
 
 ## Events
 

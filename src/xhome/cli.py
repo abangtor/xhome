@@ -197,12 +197,47 @@ def build_parser() -> argparse.ArgumentParser:
     members.add_argument("--uuid")
     members.set_defaults(func=cmd_members)
 
+    member_upsert = subparsers.add_parser("member-upsert", help="Add or update a lock/device member")
+    member_upsert.add_argument("uuid")
+    member_upsert.add_argument("--remarks", required=True)
+    member_upsert.add_argument("--avatar", default="")
+    member_upsert.add_argument("--lock-type", type=int, default=0)
+    member_upsert.add_argument("--event-user-id", type=int, default=0)
+    member_upsert.add_argument("--member-type", type=int, default=0)
+    member_upsert.add_argument("--model", type=int, default=0)
+    member_upsert.add_argument("--key-id", type=int)
+    member_upsert.set_defaults(func=cmd_member_upsert)
+
+    event_member = subparsers.add_parser("event-member", help="Update the member label for an event user")
+    event_member.add_argument("uid")
+    event_member.add_argument("event_user_id", type=int)
+    event_member.add_argument("member_type", type=int)
+    event_member.add_argument("remarks")
+    event_member.set_defaults(func=cmd_event_member)
+
     auth_list = subparsers.add_parser("auth-list", help="List temporary-password/auth entries for a device")
     auth_list.add_argument("uuid")
     auth_list.set_defaults(func=lambda args: logged_in_client(args).list_auth(args.uuid))
 
     auth_all = subparsers.add_parser("auth-all", help="List all auth entries")
     auth_all.set_defaults(func=lambda args: logged_in_client(args).list_all_auth())
+
+    auth_add_raw = subparsers.add_parser("auth-add-raw", help="Submit a pre-encoded temporary-password/auth entry")
+    auth_add_raw.add_argument("uuid")
+    auth_add_raw.add_argument("--name", required=True)
+    auth_add_raw.add_argument("--data", required=True, help="Native IVIEWSPassword-encoded data blob")
+    auth_add_raw.add_argument("--rand-key", required=True)
+    auth_add_raw.add_argument("--begin-time", type=int, default=0)
+    auth_add_raw.add_argument("--end-time", type=int, default=0)
+    auth_add_raw.add_argument("--start-time", type=int, default=0)
+    auth_add_raw.add_argument("--stop-time", type=int, default=0)
+    auth_add_raw.add_argument("--total-times", type=int, default=0)
+    auth_add_raw.add_argument("--week", type=int, default=0)
+    auth_add_raw.add_argument("--user-type", type=int, default=2)
+    auth_add_raw.add_argument("--auth-type", type=int, default=1)
+    auth_add_raw.add_argument("--entry", default="app")
+    auth_add_raw.add_argument("--yes", action="store_true")
+    auth_add_raw.set_defaults(func=cmd_auth_add_raw)
 
     auth_rename = subparsers.add_parser("auth-rename", help="Rename auth entry IDs")
     auth_rename.add_argument("uuid")
@@ -215,6 +250,24 @@ def build_parser() -> argparse.ArgumentParser:
     auth_delete.add_argument("ids")
     auth_delete.add_argument("--yes", action="store_true")
     auth_delete.set_defaults(func=cmd_auth_delete)
+
+    ble_lock_add = subparsers.add_parser("ble-lock-add", help="Add a BLE lock device using raw API fields")
+    ble_lock_add.add_argument("--name", required=True)
+    ble_lock_add.add_argument("--code", required=True)
+    ble_lock_add.add_argument("--mac", required=True)
+    ble_lock_add.add_argument("--longitude", required=True)
+    ble_lock_add.add_argument("--latitude", required=True)
+    ble_lock_add.add_argument("--time-zone", type=int, required=True)
+    ble_lock_add.add_argument("--iviews-func", type=int, required=True)
+    ble_lock_add.add_argument("--blename", required=True)
+    ble_lock_add.add_argument("--yes", action="store_true")
+    ble_lock_add.set_defaults(func=cmd_ble_lock_add)
+
+    ble_lock_new = subparsers.add_parser("ble-lock-new", help="Create a new BLE lock device record")
+    ble_lock_new.add_argument("uuid")
+    ble_lock_new.add_argument("model", type=int)
+    ble_lock_new.add_argument("--yes", action="store_true")
+    ble_lock_new.set_defaults(func=cmd_ble_lock_new)
 
     gms_list = subparsers.add_parser("gms-list", help="Get GMS/device config list for a device")
     gms_list.add_argument("uuid")
@@ -356,10 +409,73 @@ def cmd_members(args: argparse.Namespace) -> Any:
     return client.list_all_device_members()
 
 
+def cmd_member_upsert(args: argparse.Namespace) -> Any:
+    return logged_in_client(args).upsert_lock_member(
+        args.uuid,
+        remarks=args.remarks,
+        avatar=args.avatar,
+        lock_type=args.lock_type,
+        event_user_id=args.event_user_id,
+        member_type=args.member_type,
+        model=args.model,
+        key_id=args.key_id,
+    )
+
+
+def cmd_event_member(args: argparse.Namespace) -> Any:
+    return logged_in_client(args).update_event_member(
+        args.uid,
+        args.event_user_id,
+        args.member_type,
+        args.remarks,
+    )
+
+
+def cmd_auth_add_raw(args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise SystemExit("Refusing to add a temporary-password/auth entry without --yes")
+    return logged_in_client(args).add_temporary_password_raw(
+        args.uuid,
+        name=args.name,
+        data=args.data,
+        rand_key=args.rand_key,
+        begin_time=args.begin_time,
+        end_time=args.end_time,
+        start_time=args.start_time,
+        stop_time=args.stop_time,
+        total_times=args.total_times,
+        week=args.week,
+        user_type=args.user_type,
+        auth_type=args.auth_type,
+        entry=args.entry,
+    )
+
+
 def cmd_auth_delete(args: argparse.Namespace) -> Any:
     if not args.yes:
         raise SystemExit("Refusing to delete auth entries without --yes")
     return logged_in_client(args).delete_auth(args.uuid, args.ids)
+
+
+def cmd_ble_lock_add(args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise SystemExit("Refusing to add a BLE lock device without --yes")
+    return logged_in_client(args).add_ble_lock_device(
+        name=args.name,
+        code=args.code,
+        mac=args.mac,
+        longitude=args.longitude,
+        latitude=args.latitude,
+        time_zone=args.time_zone,
+        iviews_func=args.iviews_func,
+        blename=args.blename,
+    )
+
+
+def cmd_ble_lock_new(args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise SystemExit("Refusing to create a BLE lock device record without --yes")
+    return logged_in_client(args).new_ble_lock_device(args.uuid, args.model)
 
 
 def cmd_gms_change(args: argparse.Namespace) -> Any:
