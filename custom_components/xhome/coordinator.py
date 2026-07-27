@@ -210,7 +210,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
             is_new = self._remember_event_key(key)
-            if is_new and event["has_image"] and not seed_only:
+            if is_new and event["has_image"]:
                 _keep_newest_media_candidate(media_candidates, event)
             if not is_new or seed_only:
                 continue

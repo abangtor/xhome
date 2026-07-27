@@ -191,7 +191,7 @@ class XHomeClient:
         )
 
     def get_media_url(self, uuid: str, event_guid: str) -> JSON:
-        return self.post("v1/api/app/device/oss/list", {"type": uuid, "event_guid": event_guid})
+        return self.post("v1/api/app/device/oss/list", {"uuid": uuid, "event_guid": event_guid})
 
     def delete_event_records(self, *, start_time: int, end_time: int, ids: str) -> JSON:
         return self.post(
