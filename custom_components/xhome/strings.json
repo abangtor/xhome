@@ -68,7 +68,11 @@
       "call_screen": {
         "name": "Call screen"
       }
+    },
+    "image": {
+      "latest_event_image": {
+        "name": "Latest event image"
+      }
     }
   }
 }
-

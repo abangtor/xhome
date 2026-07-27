@@ -259,11 +259,17 @@ Current implementation fires Home Assistant bus events from the polled
 
 - `xhome_event` for every new record
 - `xhome_doorbell` for ring/call-like records
+- a latest event image entity per device for the latest image-bearing event
 
 The Android app receives doorbell calls through mobile push providers
 (`FirebaseMessagingService`, Huawei Push, Xiaomi/Oppo/Vivo receivers) and a
 Lancens `PushInfo` path whose action is `call`. That is not implemented in Home
 Assistant yet.
+
+The latest-event image implementation resolves `v1/api/app/device/oss/list`
+only for new image-bearing events and keeps signed URLs out of entity state.
+Live video still depends on the native `IVIEWSAVAPIs` P2P stack and is not
+implemented.
 
 Outcome: Automations can react to XHome events without live P2P video.
 

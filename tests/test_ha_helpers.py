@@ -80,6 +80,37 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertTrue(payload["has_image"])
         self.assertNotIn("m_oss_url", payload)
 
+    def test_event_has_image_accepts_image_fields(self):
+        self.assertTrue(helpers.event_has_image({"img": "snapshot.jpg"}))
+        self.assertTrue(helpers.event_has_image({"m_oss_url": "https://example.test/snapshot.jpg"}))
+        self.assertFalse(helpers.event_has_image({"event_guid": "guid-1"}))
+
+    def test_media_items_extract_oss_urls(self):
+        payload = {
+            "resultData": {
+                "data": [
+                    {
+                        "oss_url": "https://example.test/snapshot.jpg?token=secret",
+                        "file_name": "snapshot.jpg",
+                        "exp_time": 456,
+                    }
+                ]
+            }
+        }
+
+        item = helpers.first_media_item(payload)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(helpers.media_url_from_item(item), "https://example.test/snapshot.jpg?token=secret")
+        self.assertEqual(helpers.guess_media_content_type(item["oss_url"], item["file_name"]), "image/jpeg")
+
+    def test_media_url_from_event_requires_http_url(self):
+        self.assertEqual(
+            helpers.media_url_from_event({"m_oss_url": "https://example.test/snapshot.jpg"}),
+            "https://example.test/snapshot.jpg",
+        )
+        self.assertIsNone(helpers.media_url_from_event({"img": "relative/snapshot.jpg"}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,6 @@ EVENT_XHOME_EVENT = "xhome_event"
 
 REGIONS = ["usa", "china", "europe", "test"]
 
-PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.IMAGE]
 
 SERVICE_REFRESH = "refresh"

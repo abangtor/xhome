@@ -178,6 +178,15 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/safe/lock")
         self.assertEqual(kwargs["json"], {"safe_password": "safe-pass", "entry": "app"})
 
+    def test_get_media_url_uses_type_key_for_uid(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+        client.get_media_url("abc", "guid-1")
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/device/oss/list")
+        self.assertEqual(kwargs["json"], {"type": "abc", "event_guid": "guid-1"})
+
     def test_result_status_200_is_success(self):
         session = FakeSession({"message": "success", "resultStatus": 200, "resultData": {"ok": True}})
         client = XHomeClient(token="tok", session=session)

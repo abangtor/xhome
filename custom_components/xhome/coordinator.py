@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 import requests
@@ -34,12 +36,18 @@ from .const import (
 from .helpers import (
     device_name,
     device_uid,
+    event_has_image,
     event_key,
     event_payload,
     event_records,
+    first_media_item,
+    first_present,
     first_from_sources,
+    guess_media_content_type,
     int_value,
     is_doorbell_event,
+    media_url_from_event,
+    media_url_from_item,
     string_value,
     unwrap_dict,
 )
@@ -94,6 +102,25 @@ class XHomeCoordinatorData:
     devices: dict[str, XHomeDeviceRuntimeData] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class XHomeLatestEventMedia:
+    """Resolved media for the latest image-bearing XHome event."""
+
+    uid: str
+    event_key: str
+    event_guid: str | None
+    event_id: str | None
+    event_type: str | None
+    time: str | None
+    time_stamp: int | None
+    url: str
+    file_name: str | None = None
+    exp_time: int | None = None
+    content_type: str | None = None
+    video_status: int | None = None
+    video_size: int | None = None
+
+
 class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
     """Coordinate cloud polling for one XHome account."""
 
@@ -110,6 +137,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._seen_event_keys: set[str] = set()
         self._seen_event_order: deque[str] = deque()
         self._event_poll_seeded = False
+        self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         super().__init__(
             hass,
             LOGGER,
@@ -133,6 +161,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Seed the event dedupe cache without firing historical events."""
 
         await self.async_poll_events(seed_only=True)
+
+    def latest_event_media(self, uid: str) -> XHomeLatestEventMedia | None:
+        """Return cached latest event media for a device."""
+
+        return self._latest_event_media.get(uid)
 
     async def _async_update_data(self) -> XHomeCoordinatorData:
         """Fetch the latest data from XHome."""
@@ -173,16 +206,32 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             LOGGER.debug("XHome event polling failed: %s", err)
             return
 
-        for event in events:
+        media_candidates: dict[str, dict[str, Any]] = {}
+        for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
-            if not self._remember_event_key(key) or seed_only:
+            is_new = self._remember_event_key(key)
+            if is_new and event["has_image"]:
+                _keep_newest_media_candidate(media_candidates, event)
+            if not is_new or seed_only:
                 continue
 
             payload = event["payload"]
             self.hass.bus.async_fire(EVENT_XHOME_EVENT, payload)
             if event["doorbell"]:
                 self.hass.bus.async_fire(EVENT_XHOME_DOORBELL, payload)
+
+        if await self._async_update_latest_event_media(media_candidates.values()):
+            self.async_update_listeners()
         self._event_poll_seeded = True
+
+    async def async_get_latest_event_image(self, uid: str) -> bytes | None:
+        """Return latest event image bytes for a device."""
+
+        try:
+            return await self.hass.async_add_executor_job(self._download_latest_event_image, uid)
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            LOGGER.debug("XHome latest event image fetch failed: %s", err)
+            return None
 
     def _unlock_device(self, uid: str) -> JSON:
         """Synchronous unlock helper."""
@@ -239,8 +288,12 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 key = event_key(data.uid, record)
                 events.append(
                     {
+                        "uid": data.uid,
                         "event_key": key,
                         "doorbell": is_doorbell_event(record),
+                        "has_image": event_has_image(record),
+                        "record": record,
+                        "sort_key": _record_sort_key(record),
                         "payload": {
                             **event_payload(data.device, record),
                             "event_key": key,
@@ -248,6 +301,98 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                     }
                 )
         return events
+
+    async def _async_update_latest_event_media(self, events: Iterable[dict[str, Any]]) -> bool:
+        """Resolve and cache latest event media from event candidates."""
+
+        updated = False
+        for event in events:
+            media = await self.hass.async_add_executor_job(self._resolve_event_media, event)
+            if media is None:
+                continue
+            current = self._latest_event_media.get(media.uid)
+            if current is not None and _media_sort_key(current) > _media_sort_key(media):
+                continue
+            self._latest_event_media[media.uid] = media
+            updated = True
+        return updated
+
+    def _resolve_event_media(self, event: dict[str, Any]) -> XHomeLatestEventMedia | None:
+        """Resolve a signed media URL for an event."""
+
+        self._ensure_login()
+
+        uid = event["uid"]
+        record = event["record"]
+        event_guid = string_value(first_present(record, "event_guid", "eventGuid", "guid"))
+        media_item: dict[str, Any] | None = None
+        url = media_url_from_event(record)
+
+        if url is None and event_guid:
+            media_payload = self.client.get_media_url(uid, event_guid)
+            media_item = first_media_item(media_payload)
+            if media_item is not None:
+                url = media_url_from_item(media_item)
+        if url is None:
+            return None
+
+        file_name = string_value(media_item.get("file_name")) if media_item else None
+        return XHomeLatestEventMedia(
+            uid=uid,
+            event_key=event["event_key"],
+            event_guid=event_guid,
+            event_id=string_value(first_present(record, "id", "event_id", "eventId")),
+            event_type=string_value(record.get("type")),
+            time=string_value(record.get("time")),
+            time_stamp=int_value(first_present(record, "time_stamp", "timeStamp", "timestamp")),
+            url=url,
+            file_name=file_name,
+            exp_time=int_value(media_item.get("exp_time")) if media_item else None,
+            content_type=guess_media_content_type(url, file_name),
+            video_status=int_value(record.get("video_status")),
+            video_size=int_value(record.get("video_size")),
+        )
+
+    def _download_latest_event_image(self, uid: str) -> bytes | None:
+        """Download latest event image bytes from the cached signed URL."""
+
+        media = self._latest_event_media.get(uid)
+        if media is None:
+            return None
+
+        if _media_url_expired(media):
+            self._refresh_event_media_url(media)
+        response = self.client.session.get(media.url, timeout=self.client.timeout)
+        response.raise_for_status()
+        response_content_type = _response_content_type(response)
+        content_type = response_content_type or media.content_type
+        if content_type is not None and not content_type.startswith("image/"):
+            media.content_type = content_type
+            return None
+        media.content_type = content_type or "image/jpeg"
+        return response.content or None
+
+    def _refresh_event_media_url(self, media: XHomeLatestEventMedia) -> None:
+        """Refresh an expired signed media URL when possible."""
+
+        if not media.event_guid:
+            return
+
+        self._ensure_login()
+        media_payload = self.client.get_media_url(media.uid, media.event_guid)
+        media_item = first_media_item(media_payload)
+        if media_item is None:
+            return
+
+        url = media_url_from_item(media_item)
+        if url is None:
+            return
+
+        file_name = string_value(media_item.get("file_name"))
+        media.url = url
+        media.file_name = file_name
+        media.exp_time = int_value(media_item.get("exp_time"))
+        media.content_type = guess_media_content_type(url, file_name)
 
     def _ensure_login(self) -> None:
         """Log in when the client does not already have a token."""
@@ -278,3 +423,46 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._seen_event_order.append(key)
         self._seen_event_keys.add(key)
         return True
+
+
+def _record_sort_key(record: dict[str, Any]) -> tuple[int, str]:
+    """Return a stable event ordering key."""
+
+    timestamp = int_value(first_present(record, "time_stamp", "timeStamp", "timestamp")) or 0
+    event_id = string_value(first_present(record, "id", "event_id", "eventId", "event_guid", "eventGuid")) or ""
+    return (timestamp, event_id)
+
+
+def _event_sort_key(event: dict[str, Any]) -> tuple[int, str]:
+    """Return a stable event ordering key for coordinator event wrappers."""
+
+    return event["sort_key"]
+
+
+def _media_sort_key(media: XHomeLatestEventMedia) -> tuple[int, str]:
+    """Return a stable ordering key for cached media."""
+
+    return (media.time_stamp or 0, media.event_id or media.event_guid or media.event_key)
+
+
+def _keep_newest_media_candidate(candidates: dict[str, dict[str, Any]], event: dict[str, Any]) -> None:
+    """Keep only the newest media candidate for each device in a poll."""
+
+    current = candidates.get(event["uid"])
+    if current is None or event["sort_key"] >= current["sort_key"]:
+        candidates[event["uid"]] = event
+
+
+def _response_content_type(response: requests.Response) -> str | None:
+    """Return a normalized response content type."""
+
+    content_type = response.headers.get("Content-Type")
+    if not content_type:
+        return None
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+def _media_url_expired(media: XHomeLatestEventMedia) -> bool:
+    """Return True when a signed media URL appears expired or nearly expired."""
+
+    return media.exp_time is not None and media.exp_time <= int(time.time()) + 60

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlparse
 
 from .api.client import JSON, unwrap_response
 
 DOORBELL_EVENT_TYPES = {"1"}
 DOORBELL_TEXT_MARKERS = ("call", "doorbell", "door bell", "ding", "press", "ring", "visitor")
 EVENT_LIST_KEYS = ("eventList", "oneList", "events", "data", "list", "recordList", "rows", "result")
+MEDIA_LIST_KEYS = ("data", "files", "list", "media", "mediaList", "rows", "result")
+MEDIA_URL_KEYS = ("oss_url", "m_oss_url", "img", "image", "image_url", "imageUrl", "url")
 
 
 def unwrap_dict(payload: JSON | None) -> dict[str, Any]:
@@ -174,6 +178,61 @@ def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, An
     }
 
 
+def event_has_image(event: dict[str, Any]) -> bool:
+    """Return True when an event has an image field or resolvable media URL."""
+
+    return any(string_value(event.get(key)) for key in ("img", "m_oss_url"))
+
+
+def media_items(payload: JSON | None) -> list[dict[str, Any]]:
+    """Extract media records from known XHome OSS response shapes."""
+
+    if payload is None:
+        return []
+    return _media_items_from_value(unwrap_response(payload))
+
+
+def first_media_item(payload: JSON | None) -> dict[str, Any] | None:
+    """Return the first media item, preferring image-looking URLs."""
+
+    items = media_items(payload)
+    for item in items:
+        url = media_url_from_item(item)
+        if url and is_image_media(url, file_name=string_value(item.get("file_name"))):
+            return item
+    return items[0] if items else None
+
+
+def media_url_from_event(event: dict[str, Any]) -> str | None:
+    """Return a direct HTTP media URL from an event when present."""
+
+    return _first_http_url(string_value(first_present(event, "m_oss_url", "img")))
+
+
+def media_url_from_item(item: dict[str, Any]) -> str | None:
+    """Return a direct HTTP media URL from an OSS media record."""
+
+    for key in MEDIA_URL_KEYS:
+        if url := _first_http_url(string_value(item.get(key))):
+            return url
+    return None
+
+
+def guess_media_content_type(url: str, file_name: str | None = None) -> str | None:
+    """Guess a media content type from a filename or URL path."""
+
+    target = file_name or urlparse(url).path
+    content_type, _ = mimetypes.guess_type(target)
+    return content_type
+
+
+def is_image_media(url: str, *, content_type: str | None = None, file_name: str | None = None) -> bool:
+    """Return True when media metadata suggests an image."""
+
+    guessed = content_type or guess_media_content_type(url, file_name)
+    return guessed is not None and guessed.startswith("image/")
+
+
 def _event_records_from_value(value: Any) -> list[dict[str, Any]]:
     """Recursively extract likely event dicts from a value."""
 
@@ -206,3 +265,32 @@ def _looks_like_event_record(value: dict[str, Any]) -> bool:
             "m_oss_url",
         )
     ) and any(key in value for key in ("id", "type", "event_guid", "eventGuid"))
+
+
+def _media_items_from_value(value: Any) -> list[dict[str, Any]]:
+    """Recursively extract likely media dicts from a value."""
+
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict) and media_url_from_item(item)]
+    if not isinstance(value, dict):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for key in MEDIA_LIST_KEYS:
+        if key in value:
+            records.extend(_media_items_from_value(value[key]))
+    if records:
+        return records
+    return [value] if media_url_from_item(value) else []
+
+
+def _first_http_url(value: str | None) -> str | None:
+    """Return a URL only when it is directly fetchable."""
+
+    if not value:
+        return None
+    normalized = value.strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return normalized
+    return None

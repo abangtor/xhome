@@ -8,7 +8,8 @@ and door devices.
 This repository now contains the first Home Assistant project skeleton and the
 reverse-engineered REST API wrapper. The API client has offline tests; the Home
 Assistant integration has an initial config flow, coordinator, lock entity,
-sensors, binary sensors, diagnostics, and a refresh service.
+sensors, binary sensors, latest event image entity, diagnostics, and a refresh
+service.
 
 The first supported path will be normal username/password auth only. Google,
 WeChat, native P2P video/control, BLE provisioning, and temporary password
@@ -20,6 +21,7 @@ Expose XHome door devices cleanly in Home Assistant:
 
 - Door unlock through a native `LockEntity`
 - Battery, RSSI, online, firmware, and diagnostic sensors
+- Latest event image through a native Home Assistant image entity
 - Event/media polling where the cloud REST API supports it
 - Safe device settings after core state and unlock are stable
 
@@ -125,6 +127,20 @@ triggers:
 This is polling-based. The Android app receives near-real-time doorbell calls
 through mobile push providers and Lancens push hosts, but that push client path
 has not been reimplemented for Home Assistant yet.
+
+## Event Images
+
+The integration exposes an `image` entity for each device's latest image-bearing
+event. When a new event references media, the coordinator resolves the event's
+signed OSS URL and the image entity downloads the bytes only when Home Assistant
+requests the image.
+
+Signed media URLs are not exposed in entity state or diagnostics. The entity
+keeps only redacted event metadata such as event GUID, event type, timestamp,
+file name, and expiry timestamp.
+
+This is event media, not a live camera stream. Live video uses the app's native
+P2P stack and is still out of scope for this REST-first integration.
 
 ## Development Roadmap
 
