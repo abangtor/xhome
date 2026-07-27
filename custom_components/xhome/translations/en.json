@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "XHome",
+        "description": "Connect to the XHome/Lancens cloud with normal username and password authentication.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "region": "Region",
+          "scan_interval": "Device scan interval",
+          "event_scan_interval": "Event scan interval",
+          "timeout": "Request timeout"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid username, password, or region",
+      "cannot_connect": "Cannot connect to the XHome cloud",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This XHome account and region are already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "XHome options",
+        "data": {
+          "scan_interval": "Device scan interval",
+          "event_scan_interval": "Event scan interval",
+          "timeout": "Request timeout"
+        }
+      }
+    }
+  },
+  "entity": {
+    "lock": {
+      "door_lock": {
+        "name": "Door lock"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "rssi": {
+        "name": "RSSI"
+      },
+      "online_type": {
+        "name": "Online type"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "screen_timeout": {
+        "name": "Screen timeout"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      },
+      "battery_display": {
+        "name": "Battery display"
+      },
+      "call_screen": {
+        "name": "Call screen"
+      }
+    }
+  }
+}
+

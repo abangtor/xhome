@@ -5,8 +5,10 @@ and door devices.
 
 ## Status
 
-This repository is freshly scaffolded. The reverse-engineered REST API wrapper
-and Home Assistant integration will be moved in next.
+This repository now contains the first Home Assistant project skeleton and the
+reverse-engineered REST API wrapper. The API client has offline tests; the Home
+Assistant integration has an initial config flow, coordinator, lock entity,
+sensors, binary sensors, diagnostics, and a refresh service.
 
 The first supported path will be normal username/password auth only. Google,
 WeChat, native P2P video/control, BLE provisioning, and temporary password
@@ -34,6 +36,24 @@ Expose XHome door devices cleanly in Home Assistant:
 └── .github/workflows/            # CI workflows
 ```
 
+## Local Development
+
+Install the Python package into a Home Assistant development environment, then
+copy or symlink `custom_components/xhome` into Home Assistant's
+`custom_components` directory.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Run the API client tests:
+
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
 ## Architecture
 
 The integration should stay thin. Home Assistant code should handle config
@@ -57,11 +77,9 @@ Assistant's standard `lock.unlock` path rather than a second generic service.
 
 ## Development Roadmap
 
-1. Move the existing `xhome-api` wrapper into `src/xhome`.
-2. Add the Home Assistant `custom_components/xhome` skeleton.
-3. Implement config flow login and device discovery.
-4. Add lock, battery, RSSI, firmware, and online entities.
-5. Add event/media polling.
-6. Add safe settings entities.
-7. Add tests, hassfest, and CI.
-
+1. Harden the config flow and coordinator with Home Assistant test coverage.
+2. Test setup against a real Home Assistant instance without triggering unlock.
+3. Manually test `lock.unlock` once only when explicitly requested.
+4. Add event/media polling.
+5. Add safe settings entities.
+6. Add HACS/hassfest/CI packaging.

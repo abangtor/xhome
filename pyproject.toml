@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xhome-api"
+version = "0.1.0"
+description = "Python client and Home Assistant custom integration for XHome/Lancens cloud devices."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "homeassistant>=2024.6.0",
+    "pytest>=8.0",
+    "pytest-homeassistant-custom-component>=0.13.0",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+xhome = "xhome.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
