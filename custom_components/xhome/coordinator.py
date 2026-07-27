@@ -210,7 +210,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
             is_new = self._remember_event_key(key)
-            if is_new and event["has_image"]:
+            if is_new and event["has_image"] and not seed_only:
                 _keep_newest_media_candidate(media_candidates, event)
             if not is_new or seed_only:
                 continue
@@ -307,7 +307,15 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         updated = False
         for event in events:
-            media = await self.hass.async_add_executor_job(self._resolve_event_media, event)
+            try:
+                media = await self.hass.async_add_executor_job(self._resolve_event_media, event)
+            except XHomeAuthError as err:
+                self.client.token = None
+                LOGGER.warning("XHome event media authentication failed: %s", err)
+                continue
+            except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+                LOGGER.debug("Skipping XHome event media for %s: %s", event.get("event_key"), err)
+                continue
             if media is None:
                 continue
             current = self._latest_event_media.get(media.uid)
