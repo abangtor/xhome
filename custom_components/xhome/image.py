@@ -36,6 +36,7 @@ class XHomeLatestEventImage(XHomeEntity, ImageEntity):
         """Initialize the latest event image entity."""
 
         super().__init__(coordinator, uid, "latest_event_image")
+        ImageEntity.__init__(self, coordinator.hass)
 
     @property
     def available(self) -> bool:
