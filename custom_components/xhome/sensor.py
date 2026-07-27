@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfSignalStrength, UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -17,6 +17,8 @@ from .const import DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeDeviceRuntimeData
 from .entity import XHomeEntity
 from .helpers import int_value, string_value
+
+SIGNAL_STRENGTH_DBM = "dBm"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -39,7 +41,7 @@ SENSORS: tuple[XHomeSensorEntityDescription, ...] = (
         key="rssi",
         translation_key="rssi",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
-        native_unit_of_measurement=UnitOfSignalStrength.DECIBELS_MILLIWATT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DBM,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: int_value(data.first("rssi", "RSSI", "wifi_rssi", "wifiRssi")),
     ),
