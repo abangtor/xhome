@@ -41,6 +41,11 @@
         "name": "Door lock"
       }
     },
+    "button": {
+      "unlock": {
+        "name": "Unlock"
+      }
+    },
     "sensor": {
       "battery": {
         "name": "Battery"

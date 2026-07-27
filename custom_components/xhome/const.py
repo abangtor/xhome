@@ -22,6 +22,6 @@ EVENT_XHOME_PREFIX = "xhome_"
 
 REGIONS = ["usa", "china", "europe", "test"]
 
-PLATFORMS = [Platform.LOCK, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.IMAGE]
+PLATFORMS = [Platform.LOCK, Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.IMAGE]
 
 SERVICE_REFRESH = "refresh"

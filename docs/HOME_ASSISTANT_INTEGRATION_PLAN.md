@@ -239,6 +239,8 @@ risk.
 - Validate username/password login and device discovery.
 - Add `DataUpdateCoordinator`.
 - Add one `LockEntity` per door device.
+- Add one unlock `ButtonEntity` per door device for dashboard-friendly
+  one-shot unlock actions.
 - Add battery, RSSI, online, and firmware sensors.
 - Add online binary sensor.
 - Add diagnostics redacting token and full UID.

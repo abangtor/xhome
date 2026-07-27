@@ -20,6 +20,7 @@ generation are out of scope for the first Home Assistant version.
 Expose XHome door devices cleanly in Home Assistant:
 
 - Door lock/unlock through a native `LockEntity`
+- One-shot unlock button for dashboard-friendly door control
 - Battery, RSSI, online, firmware, and diagnostic sensors
 - Latest event image through a native Home Assistant image entity
 - Event/media polling where the cloud REST API supports it
