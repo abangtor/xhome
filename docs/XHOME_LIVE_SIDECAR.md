@@ -33,8 +33,9 @@ The insecure flag is currently needed for the observed USA native host
 certificate mismatch; the original Android library appears to tolerate that
 mismatch.
 
-Add `--send-start` to deliberately send command `20` after login and command
-`21` before exit during controlled stream testing.
+Add `--send-start` to deliberately send command `20` about one second after
+login, matching the Android app's live-view timing. Command `21` is sent before
+exit during controlled stream testing.
 
 Add `--p2p-probe` with `--send-start` to send the first pure-Python UDP
 client-connecting packets to the returned relay. This is still a probe, not a
@@ -44,7 +45,8 @@ Add `--p2p-rendezvous` with `--send-start` to continue farther into the native
 client state machine. The rendezvous probe parses relay type-7 responses into
 local/public/relay peer candidates, sends type-11 direct punch packets, sends
 type-15 relay-info packets, answers type-11 peer handshakes with type-12
-responses, and reports any type-13/18/19 KCP data packets it sees.
+responses, sends the app's repeated four-packet type-18/channel-4 relay touch
+bursts, and reports any type-13/18/19 KCP data packets it sees.
 
 Add `--kcp-start` to the rendezvous probe to actively send command `20` through
 the recovered KCP path. The native TLS session is kept open while UDP rendezvous
@@ -61,13 +63,15 @@ python -m xhome.live_sidecar cloud-probe \
   --insecure-skip-verify
 ```
 
-Native KCP packets use UDP packet type `13`, `18`, or `19` with UDP envelope
-channel `4`. The KCP conversation id then identifies the logical channel:
-`0x11223344` for channel 1 and `0x11223345` for channel 2, with
-`nodelay(1, 10, 2, 1)`. Normal app commands, including command `20`, are sent as
-the native 8-byte command frame over KCP channel 2. Once device-origin media is
-received, channel 2 should carry command-`8` records with the 40-byte XHome
-media header that can be stripped to H.264/G.711/JPEG.
+Native KCP packets use UDP packet type `13`, `18`, or `19`. The UDP envelope
+channel is the native logical channel: `1` for control and `2` for media.
+Packet type `18` with UDP channel `4` is a separate relay-touch packet: eight
+opaque/timestamp-like bytes followed by the UID, echoed by the relay as packet
+type `19`/channel `4`. KCP itself uses conversation id `0x11223344` for channel
+1 and `0x11223345` for channel 2, with `nodelay(1, 10, 2, 1)`. Once
+device-origin media is received, channel 2 carries command-`8` records with the
+lower-level app-media fragmentation header; those fragments assemble into the
+40-byte XHome media frames that can be stripped to H.264/G.711/JPEG.
 
 The sidecar includes a KCP channel wrapper for those recovered parameters. The
 compiled KCP dependency is intentionally optional and is not part of the Home

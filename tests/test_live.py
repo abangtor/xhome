@@ -24,6 +24,7 @@ from xhome.live_p2p import (
     build_client_connect_payload,
     build_peer_punch_payload,
     build_peer_punch_response_payload,
+    build_relay_touch_nonce,
     build_relay_touch_payload,
     build_uid_payload,
     decode_udp_packet,
@@ -261,6 +262,13 @@ class LiveTransportTests(unittest.TestCase):
         payload = build_relay_touch_payload(uid="LSV212PFJU5TQT42R3UX", nonce=b"12345678")
 
         self.assertEqual(payload, b"12345678LSV212PFJU5TQT42R3UX")
+
+    def test_relay_touch_nonce_starts_with_unix_seconds(self):
+        nonce = build_relay_touch_nonce(now=1_785_236_585, tick=607_005)
+
+        self.assertEqual(len(nonce), 8)
+        self.assertEqual(nonce[:4], (1_785_236_585).to_bytes(4, "little"))
+        self.assertEqual(nonce[4:], (607_005).to_bytes(4, "little"))
 
     def test_kcp_udp_packet_appends_uid_for_direct_relay_mode(self):
         packet = decode_udp_packet(

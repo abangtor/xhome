@@ -118,6 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="During --p2p-rendezvous, try sending command 20 over the recovered KCP channels",
     )
     probe.add_argument(
+        "--relay-touch-time-offset",
+        type=float,
+        default=0.0,
+        help="Seconds to add to the native-looking relay-touch nonce timestamp",
+    )
+    probe.add_argument(
         "--insecure-skip-verify",
         action="store_true",
         help="Disable TLS certificate verification; native hosts may present mismatched certificates",
@@ -229,15 +235,12 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
     ) as transport:
         transport.login()
         frames = []
-        if args.send_start and not args.p2p_rendezvous:
-            frames.extend(transport.read_available(duration=min(2.0, args.duration)))
+        if args.send_start:
+            frames.extend(transport.read_available(duration=min(1.0, args.duration)))
             transport.send_frame(metadata.start_command)
             started = True
         frames.extend(transport.read_available(duration=args.duration if not args.p2p_rendezvous else min(3.0, args.duration)))
         if args.p2p_rendezvous and not extract_p2p_servers(frames):
-            if args.send_start and not started:
-                transport.send_frame(metadata.start_command)
-                started = True
             frames.extend(transport.read_available(duration=args.duration))
 
         p2p_servers = extract_p2p_servers(frames)
@@ -250,19 +253,13 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
                 relay_port=int(first["Port"]),
             ).run()
         if args.p2p_rendezvous and p2p_relays:
-            def send_start_once() -> None:
-                nonlocal started
-                if args.send_start and not started:
-                    transport.send_frame(metadata.start_command)
-                    started = True
-
             p2p_rendezvous = XHomeP2PRendezvousProbe(
                 uid=args.uid,
                 relays=p2p_relays,
             ).run(
                 duration=args.duration,
                 kcp_start_command=metadata.start_command if args.kcp_start else None,
-                on_ready=send_start_once if args.send_start else None,
+                relay_touch_time_offset=args.relay_touch_time_offset,
             )
             frames.extend(transport.read_available(duration=min(1.0, args.timeout)))
         if started:
