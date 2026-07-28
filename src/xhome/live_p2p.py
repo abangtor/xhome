@@ -350,6 +350,7 @@ class XHomeP2PRendezvousProbe:
             }
             kcp_probe = KcpStartProbe(uid=self.uid, sock=sock, start_command=kcp_start_command)
             next_kcp_start = 0.0
+            next_heartbeat = 0.0
 
             for relay in self.relays:
                 sock.sendto(encode_udp_packet(P2PPacketType.RELAY_TOUCH), relay)
@@ -357,36 +358,38 @@ class XHomeP2PRendezvousProbe:
 
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
-                for relay in self.relays:
-                    sock.sendto(encode_udp_packet(P2PPacketType.CLIENT_CONNECT, connect_payload), relay)
-                    sent_counts["client_connect"] += 1
-
-                for candidate in list(candidates.values()):
-                    if candidate.kind == P2PAddressKind.RELAY:
-                        sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
-                        sent_counts["relay_info"] += 1
-                        sock.sendto(
-                            encode_udp_packet(
-                                P2PPacketType.DIRECT_KCP_DATA,
-                                relay_touch_payload,
-                                channel=RAW_CHANNEL,
-                            ),
-                            candidate.address,
-                        )
-                        sent_counts["relay_touch_channel4"] += 1
-                    else:
-                        punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
-                        sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
-                        sent_counts["direct_punch"] += 1
-
                 now = time.monotonic()
+                if selected_peer is None:
+                    for relay in self.relays:
+                        sock.sendto(encode_udp_packet(P2PPacketType.CLIENT_CONNECT, connect_payload), relay)
+                        sent_counts["client_connect"] += 1
+
+                    for candidate in list(candidates.values()):
+                        if candidate.kind == P2PAddressKind.RELAY:
+                            sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
+                            sent_counts["relay_info"] += 1
+                            sock.sendto(
+                                encode_udp_packet(
+                                    P2PPacketType.DIRECT_KCP_DATA,
+                                    relay_touch_payload,
+                                    channel=RAW_CHANNEL,
+                                ),
+                                candidate.address,
+                            )
+                            sent_counts["relay_touch_channel4"] += 1
+                        else:
+                            punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
+                            sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
+                            sent_counts["direct_punch"] += 1
+
                 if kcp_start_command is not None and now >= next_kcp_start:
                     sent_counts["kcp_start"] += kcp_probe.send_start_packets(candidates.values())
                     next_kcp_start = now + kcp_start_interval
 
-                if selected_peer is not None:
+                if selected_peer is not None and now >= next_heartbeat:
                     sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), selected_peer)
                     sent_counts["heartbeat"] += 1
+                    next_heartbeat = now + 3.0
 
                 for received, addr in read_udp_available_with_addresses(sock, timeout=self.timeout):
                     packets.append(received)
