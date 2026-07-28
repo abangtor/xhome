@@ -20,6 +20,12 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
         self.assertIn("CONF_LOCAL_PUSH_ENABLED", source)
         self.assertIn("DEFAULT_LOCAL_PUSH_ENABLED", source)
 
+    def test_region_option_is_available(self):
+        source = CONFIG_FLOW_PATH.read_text()
+
+        self.assertIn("self._config_entry.options.get(\n                            CONF_REGION", source)
+        self.assertIn("selector.SelectSelectorConfig(options=REGIONS)", source)
+
 
 if __name__ == "__main__":
     unittest.main()

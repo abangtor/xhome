@@ -102,6 +102,13 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Required(
+                        CONF_REGION,
+                        default=self._config_entry.options.get(
+                            CONF_REGION,
+                            self._config_entry.data.get(CONF_REGION, DEFAULT_REGION),
+                        ),
+                    ): selector.SelectSelector(selector.SelectSelectorConfig(options=REGIONS)),
+                    vol.Required(
                         CONF_SCAN_INTERVAL,
                         default=self._config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                     ): vol.All(vol.Coerce(int), vol.Range(min=15, max=3600)),

@@ -39,6 +39,7 @@ async def async_get_config_entry_diagnostics(
             "username": _redact_username(entry.data.get(CONF_USERNAME)),
             "password": "**REDACTED**" if entry.data.get(CONF_PASSWORD) else None,
             "region": entry.data.get(CONF_REGION),
+            "active_region": entry.options.get(CONF_REGION) or entry.data.get(CONF_REGION),
             "options": dict(entry.options),
         },
         "devices": devices,
@@ -54,4 +55,3 @@ def _redact_username(username: str | None) -> str | None:
         name, domain = username.split("@", 1)
         return f"{name[:2]}***@{domain}"
     return f"{username[:2]}***"
-

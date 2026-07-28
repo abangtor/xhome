@@ -171,7 +171,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         self.config_entry = config_entry
         self.client = XHomeClient(
-            region=config_entry.data.get(CONF_REGION, DEFAULT_REGION),
+            region=_entry_region(config_entry),
             timeout=config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         )
         self._seen_event_keys: set[str] = set()
@@ -627,7 +627,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Return a separately authenticated client for the push worker thread."""
 
         client = XHomeClient(
-            region=self.config_entry.data.get(CONF_REGION, DEFAULT_REGION),
+            region=_entry_region(self.config_entry),
             timeout=self.config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         )
         client.login(
@@ -994,6 +994,12 @@ def _record_sort_key(record: dict[str, Any]) -> tuple[int, str]:
 
 def _noop() -> None:
     """Do nothing."""
+
+
+def _entry_region(config_entry: ConfigEntry) -> str:
+    """Return the active region, allowing options to override old entry data."""
+
+    return config_entry.options.get(CONF_REGION) or config_entry.data.get(CONF_REGION, DEFAULT_REGION)
 
 
 def _event_sort_key(event: dict[str, Any]) -> tuple[int, str]:

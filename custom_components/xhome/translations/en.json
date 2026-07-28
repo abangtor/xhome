@@ -29,6 +29,7 @@
       "init": {
         "title": "XHome options",
         "data": {
+          "region": "Region",
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
           "local_push_enabled": "Local event push",
