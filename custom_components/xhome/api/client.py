@@ -535,6 +535,70 @@ class XHomeClient:
     def set_app_safe_lock(self, safe_password: str, entry: str = "app") -> JSON:
         return self.post("v1/api/app/safe/lock", {"safe_password": safe_password, "entry": entry})
 
+    def register_push_token(
+        self,
+        push_token: str,
+        *,
+        push_platform: str = "FCM",
+        os_token: str = "",
+        language: str = "en",
+        os_name: str = "ANDROID",
+        os_push_version: int = 1,
+        bundle_id: str = BUNDLE_ID,
+        phone_model: str = "xhome-api",
+    ) -> JSON:
+        """Register the Lancens native push socket token for call events."""
+
+        return self.post(
+            "v1/api/user/token",
+            _push_token_body(
+                push_token,
+                push_platform=push_platform,
+                os_token=os_token,
+                language=language,
+                os_name=os_name,
+                os_push_version=os_push_version,
+                bundle_id=bundle_id,
+                phone_model=phone_model,
+            ),
+        )
+
+    def register_push_message_token(
+        self,
+        push_token: str,
+        *,
+        push_platform: str = "FCM",
+        os_token: str = "",
+        language: str = "en",
+        os_name: str = "ANDROID",
+        os_push_version: int = 1,
+        bundle_id: str = BUNDLE_ID,
+        phone_model: str = "xhome-api",
+    ) -> JSON:
+        """Register the Lancens native push socket token for notifications."""
+
+        return self.post(
+            "v1/api/user/message/token",
+            _push_token_body(
+                push_token,
+                push_platform=push_platform,
+                os_token=os_token,
+                language=language,
+                os_name=os_name,
+                os_push_version=os_push_version,
+                bundle_id=bundle_id,
+                phone_model=phone_model,
+            ),
+        )
+
+    def register_push_tokens(self, push_token: str, **kwargs: Any) -> dict[str, JSON]:
+        """Register the native push token with both app token endpoints."""
+
+        return {
+            "call": self.register_push_token(push_token, **kwargs),
+            "message": self.register_push_message_token(push_token, **kwargs),
+        }
+
     def app_link(self, uid: str, status: int) -> JSON:
         return self.post(
             "v1/api/app/link",
@@ -735,6 +799,29 @@ def _ids(value: str | int | list[int]) -> str:
     if isinstance(value, list):
         return ",".join(str(item) for item in value)
     return str(value)
+
+
+def _push_token_body(
+    push_token: str,
+    *,
+    push_platform: str,
+    os_token: str,
+    language: str,
+    os_name: str,
+    os_push_version: int,
+    bundle_id: str,
+    phone_model: str,
+) -> dict[str, Any]:
+    return {
+        "push_token": push_token,
+        "push_platform": push_platform,
+        "language": language,
+        "os_token": os_token,
+        "os": os_name,
+        "os_push_version": os_push_version,
+        "bundleid": bundle_id,
+        "phone_model": phone_model,
+    }
 
 
 def _without_none(values: dict[str, Any]) -> dict[str, Any]:

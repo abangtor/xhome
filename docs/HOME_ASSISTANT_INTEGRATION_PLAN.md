@@ -267,10 +267,15 @@ Current implementation fires Home Assistant bus events from the polled
   redacted event metadata as attributes
 - a latest event image entity per device for the latest image-bearing event
 
-The Android app receives doorbell calls through mobile push providers
-(`FirebaseMessagingService`, Huawei Push, Xiaomi/Oppo/Vivo receivers) and a
-Lancens `PushInfo` path whose action is `call`. That is not implemented in Home
-Assistant yet.
+The native `libIVIEWSPUSH.so` path has now been reimplemented as a pure-Python
+local push listener. Native analysis showed that the library only opens a TLS
+socket to the regional push host on port `11001`; Java handles the
+little-endian `cmd + length + payload` framing. The coordinator starts a
+background socket worker when `local_push_enabled` is true, sends the Android
+registration JSON shape, registers the returned command-`2` socket token through
+`v1/api/user/token` and `v1/api/user/message/token`, and feeds command-`3`
+payloads into the same `xhome_event` and classified-event path used by polling.
+Polling remains enabled as a fallback and dedupes against pushed event GUIDs.
 
 The latest-event image implementation resolves `v1/api/app/device/oss/list`
 only for new image-bearing events and keeps signed URLs out of entity state.
@@ -314,7 +319,8 @@ Possible future work:
 - Native P2P live video/control sidecar.
 - BLE provisioning helper.
 - Temporary lock password generation via `IVIEWSPassword`.
-- Push-notification bridge if a usable channel is found.
+- Validate local push behavior over longer Home Assistant runtime and add a
+  status/diagnostic entity if needed.
 
 Outcome: richer device support, but with much higher complexity.
 

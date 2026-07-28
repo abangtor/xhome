@@ -26,6 +26,7 @@ Expose XHome door devices cleanly in Home Assistant:
 - Latest event image through a native Home Assistant image entity
 - Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
+- Optional direct local push listener for near-real-time XHome events
 
 ## Planned Structure
 
@@ -158,10 +159,10 @@ implemented in the Python client and exposed as Home Assistant services:
 
 `add_temporary_password_raw` intentionally accepts only an already encoded
 `data` blob and `rand_key`. The Android app creates that `data` value with the
-native `IVIEWSPassword`/`IVIEWSPSD` library, which is not present in the base
-APK we have. Creating human-friendly temporary passwords remains blocked until
-that native encoder is recovered or reimplemented. Access-changing services such
-as raw temporary-password add/delete require `confirm: true`.
+native `IVIEWSPassword`/`IVIEWSPSD` library. The native library is available from
+the XAPK split now, but the encoder has not been recovered or reimplemented yet.
+Access-changing services such as raw temporary-password add/delete require
+`confirm: true`.
 
 ## Events
 
@@ -184,8 +185,12 @@ triggers:
 ```
 
 This is polling-based. The Android app receives near-real-time doorbell calls
-through mobile push providers and Lancens push hosts, but that push client path
-has not been reimplemented for Home Assistant yet.
+through mobile push providers and Lancens push hosts. The integration now also
+has an optional local push listener that connects directly to the regional
+Lancens push host on TLS port `11001`, registers the returned socket token with
+XHome's token endpoints, and feeds command `3` push payloads into the same
+`xhome_event` and classified event path used by polling. Polling remains enabled
+as a fallback and dedupes against pushed event GUIDs.
 
 Each device also has a `Last event` sensor. Its state is the normalized event
 kind, and its attributes include the redacted event id/GUID, raw XHome type,

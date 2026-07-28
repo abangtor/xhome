@@ -551,6 +551,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: XHomeConfigEntry) -> boo
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await coordinator.async_seed_events()
+    entry.async_on_unload(coordinator.async_start_local_push())
     entry.async_on_unload(coordinator.async_start_event_polling())
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

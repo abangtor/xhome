@@ -7,11 +7,13 @@ from homeassistant.const import Platform
 DOMAIN = "xhome"
 
 CONF_EVENT_SCAN_INTERVAL = "event_scan_interval"
+CONF_LOCAL_PUSH_ENABLED = "local_push_enabled"
 CONF_REGION = "region"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TIMEOUT = "timeout"
 
 DEFAULT_EVENT_SCAN_INTERVAL = 60
+DEFAULT_LOCAL_PUSH_ENABLED = True
 DEFAULT_REGION = "usa"
 DEFAULT_SCAN_INTERVAL = 60
 DEFAULT_TIMEOUT = 30

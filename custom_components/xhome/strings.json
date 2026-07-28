@@ -10,6 +10,7 @@
           "region": "Region",
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
+          "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }
       }
@@ -30,6 +31,7 @@
         "data": {
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
+          "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }
       }

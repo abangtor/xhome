@@ -18,3 +18,7 @@ class XHomeAPIError(XHomeError):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+class XHomePushError(XHomeError):
+    """The XHome native push socket failed."""

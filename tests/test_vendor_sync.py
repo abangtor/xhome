@@ -11,7 +11,7 @@ VENDORED_API = ROOT / "custom_components" / "xhome" / "api"
 
 class VendorSyncTests(unittest.TestCase):
     def test_runtime_api_copy_matches_source_package(self):
-        for filename in ["client.py", "constants.py", "exceptions.py", "models.py", "signing.py"]:
+        for filename in ["client.py", "constants.py", "exceptions.py", "models.py", "push.py", "signing.py"]:
             with self.subTest(filename=filename):
                 self.assertEqual((VENDORED_API / filename).read_text(), (SOURCE_API / filename).read_text())
 

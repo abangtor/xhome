@@ -300,6 +300,30 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/safe/lock")
         self.assertEqual(kwargs["json"], {"safe_password": "safe-pass", "entry": "app"})
 
+    def test_register_push_tokens_posts_call_and_message_tokens(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+
+        client.register_push_tokens("push-token", phone_model="xhome-test")
+
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(session.calls[0][0][1], "https://chniot.lancens.com:6448/v1/api/user/token")
+        self.assertEqual(session.calls[1][0][1], "https://chniot.lancens.com:6448/v1/api/user/message/token")
+        for _, kwargs in session.calls:
+            self.assertEqual(
+                kwargs["json"],
+                {
+                    "push_token": "push-token",
+                    "push_platform": "FCM",
+                    "language": "en",
+                    "os_token": "",
+                    "os": "ANDROID",
+                    "os_push_version": 1,
+                    "bundleid": "com.lancens.wxdoorbell",
+                    "phone_model": "xhome-test",
+                },
+            )
+
     def test_get_media_url_uses_uuid_key_for_uid(self):
         session = FakeSession({"message": "ok"})
         client = XHomeClient(token="tok", session=session)

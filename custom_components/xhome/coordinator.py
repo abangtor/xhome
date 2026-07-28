@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
 import mimetypes
 from pathlib import Path
 import re
+from threading import Event, Thread
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -24,12 +25,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .api.client import JSON
+from .api.exceptions import XHomePushError
+from .api.push import XHomePushClient, XHomePushMessage, build_push_register_info
 from .const import (
     CONF_EVENT_SCAN_INTERVAL,
+    CONF_LOCAL_PUSH_ENABLED,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_EVENT_SCAN_INTERVAL,
+    DEFAULT_LOCAL_PUSH_ENABLED,
     DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIMEOUT,
@@ -176,6 +181,8 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         self._latest_event_video_media: dict[str, XHomeLatestEventMedia] = {}
         self._downloaded_event_media: dict[str, XHomeDownloadedEventMedia] = {}
+        self._local_push_client: XHomePushClient | None = None
+        self._local_push_registered_token: str | None = None
         super().__init__(
             hass,
             LOGGER,
@@ -194,6 +201,29 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             self._async_event_poll_tick,
             timedelta(seconds=self.config_entry.options.get(CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL)),
         )
+
+    def async_start_local_push(self) -> Callable[[], None]:
+        """Start the native push socket listener."""
+
+        if not self.config_entry.options.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED):
+            return _noop
+
+        stop_event = Event()
+        thread = Thread(
+            target=self._local_push_worker,
+            args=(stop_event,),
+            name=f"xhome-local-push-{self.config_entry.entry_id}",
+            daemon=True,
+        )
+        thread.start()
+
+        def stop_local_push() -> None:
+            stop_event.set()
+            if self._local_push_client is not None:
+                self._local_push_client.close()
+            thread.join(timeout=2)
+
+        return stop_local_push
 
     async def async_seed_events(self) -> None:
         """Seed the event dedupe cache without firing historical events."""
@@ -380,10 +410,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             if not is_new or seed_only:
                 continue
 
-            payload = event["payload"]
-            self.hass.bus.async_fire(EVENT_XHOME_EVENT, payload)
-            for event_type in event["bus_event_types"]:
-                self.hass.bus.async_fire(event_type, payload)
+            self._fire_event_bus_events(event)
 
         updated = self._update_latest_events(event_candidates.values())
         if await self._async_update_latest_event_media(media_candidates):
@@ -391,6 +418,30 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         if updated:
             self.async_update_listeners()
         self._event_poll_seeded = True
+
+    async def async_handle_local_push_event(self, record: dict[str, Any]) -> None:
+        """Handle one event received from the native push socket."""
+
+        if self.data is None:
+            return
+
+        uid = string_value(first_present(record, "uid", "uuid", "device"))
+        if not uid:
+            LOGGER.debug("Skipping XHome local push event without uid")
+            return
+
+        data = self.data.devices.get(uid)
+        device = data.device if data is not None else {"uid": uid, "name": string_value(record.get("name"))}
+        event = self._event_from_record(uid, device, record, source="local_push")
+        if not self._remember_event_key(event["event_key"]):
+            return
+
+        self._fire_event_bus_events(event)
+        updated = self._update_latest_events([event])
+        if event["has_media"] and await self._async_update_latest_event_media([event]):
+            updated = True
+        if updated:
+            self.async_update_listeners()
 
     async def async_refresh_latest_event_media(self, uid: str) -> bool:
         """Refresh latest event and media caches for one device."""
@@ -536,6 +587,81 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         await self.async_poll_events()
 
+    def _local_push_worker(self, stop_event: Event) -> None:
+        """Run the native push socket in a background thread."""
+
+        backoff = 2
+        while not stop_event.is_set():
+            try:
+                client = self._new_worker_client()
+                push_client = XHomePushClient(
+                    client.region.push_host,
+                    user_id=client.user_id,
+                    timeout=min(client.timeout, 30),
+                    register_info=build_push_register_info(
+                        client.user_id,
+                        model="xhome-api",
+                        brand="HomeAssistant",
+                    ),
+                )
+                self._local_push_client = push_client
+                for message in push_client.iter_messages(stop_event=stop_event):
+                    if stop_event.is_set():
+                        break
+                    self._handle_local_push_message(client, message)
+                backoff = 2
+            except XHomeAuthError as err:
+                LOGGER.warning("XHome local push authentication failed: %s", err)
+                stop_event.wait(60)
+            except (XHomePushError, XHomeAPIError, XHomeError, OSError, TimeoutError, ValueError) as err:
+                if not stop_event.is_set():
+                    LOGGER.debug("XHome local push listener reconnecting after failure: %s", err)
+                    stop_event.wait(backoff)
+                    backoff = min(backoff * 2, 60)
+            finally:
+                if self._local_push_client is not None:
+                    self._local_push_client.close()
+                    self._local_push_client = None
+
+    def _new_worker_client(self) -> XHomeClient:
+        """Return a separately authenticated client for the push worker thread."""
+
+        client = XHomeClient(
+            region=self.config_entry.data.get(CONF_REGION, DEFAULT_REGION),
+            timeout=self.config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+        )
+        client.login(
+            self.config_entry.data[CONF_USERNAME],
+            self.config_entry.data[CONF_PASSWORD],
+        )
+        return client
+
+    def _handle_local_push_message(self, client: XHomeClient, message: XHomePushMessage) -> None:
+        """Handle one parsed native push message from the worker thread."""
+
+        if message.kind == "token" and message.token:
+            self._register_local_push_token(client, message.token)
+            return
+        if message.kind == "event" and message.event:
+            self.hass.add_job(self.async_handle_local_push_event, message.event)
+
+    def _register_local_push_token(self, client: XHomeClient, push_token: str) -> None:
+        """Register the socket token with XHome's push-token endpoints."""
+
+        if push_token == self._local_push_registered_token:
+            return
+        client.register_push_tokens(
+            push_token,
+            push_platform="FCM",
+            os_token="",
+            language="en",
+            os_name="ANDROID",
+            os_push_version=1,
+            phone_model="xhome-api",
+        )
+        self._local_push_registered_token = push_token
+        LOGGER.debug("Registered XHome local push token")
+
     def _update_data(self) -> XHomeCoordinatorData:
         """Synchronous data update helper."""
 
@@ -586,25 +712,44 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             device_type = string_value(data.first("type", "model", "device_type", "deviceType")) or "9"
             payload = self.client.get_new_device_events(data.uid, device_type)
             for record in event_records(payload):
-                key = event_key(data.uid, record)
-                payload = {
-                    **event_payload(data.device, record),
-                    "event_key": key,
-                }
-                events.append(
-                    {
-                        "uid": data.uid,
-                        "event_key": key,
-                        "doorbell": is_doorbell_event(record),
-                        "has_image": event_has_image(record),
-                        "has_media": event_has_media(record),
-                        "record": record,
-                        "sort_key": _record_sort_key(record),
-                        "payload": payload,
-                        "bus_event_types": _event_bus_types(record),
-                    }
-                )
+                events.append(self._event_from_record(data.uid, data.device, record, source="poll"))
         return events
+
+    def _event_from_record(
+        self,
+        uid: str,
+        device: dict[str, Any],
+        record: dict[str, Any],
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        """Build the coordinator's internal event wrapper."""
+
+        key = event_key(uid, record)
+        payload = {
+            **event_payload(device, record),
+            "event_key": key,
+            "source": source,
+        }
+        return {
+            "uid": uid,
+            "event_key": key,
+            "doorbell": is_doorbell_event(record),
+            "has_image": event_has_image(record),
+            "has_media": event_has_media(record),
+            "record": record,
+            "sort_key": _record_sort_key(record),
+            "payload": payload,
+            "bus_event_types": _event_bus_types(record),
+        }
+
+    def _fire_event_bus_events(self, event: dict[str, Any]) -> None:
+        """Fire the generic and classified Home Assistant event bus events."""
+
+        payload = event["payload"]
+        self.hass.bus.async_fire(EVENT_XHOME_EVENT, payload)
+        for event_type in event["bus_event_types"]:
+            self.hass.bus.async_fire(event_type, payload)
 
     def _update_latest_events(self, events: Iterable[dict[str, Any]]) -> bool:
         """Cache the latest event per device."""
@@ -845,6 +990,10 @@ def _record_sort_key(record: dict[str, Any]) -> tuple[int, str]:
     timestamp = int_value(first_present(record, "time_stamp", "timeStamp", "timestamp")) or 0
     event_id = string_value(first_present(record, "id", "event_id", "eventId", "event_guid", "eventGuid")) or ""
     return (timestamp, event_id)
+
+
+def _noop() -> None:
+    """Do nothing."""
 
 
 def _event_sort_key(event: dict[str, Any]) -> tuple[int, str]:
