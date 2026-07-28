@@ -28,14 +28,21 @@ frames.
 ```bash
 python -m xhome.live_sidecar cloud-probe \
   --uid LSV212PFJU5TQT42R3UX \
-  --token ... \
-  --native-iot-host usaiotd.lancens.com \
+  --region usa \
   --insecure-skip-verify
 ```
 
 The insecure flag is currently needed for the observed USA native host
 certificate mismatch; the original Android library appears to tolerate that
 mismatch.
+
+`cloud-probe` and `mjpeg-server` can fetch their own live token. Pass
+`--token` only when you already have a native live token from
+`xhome.prepare_live_stream`. If `--token` is omitted, the sidecar logs in via
+`XHOME_USERNAME`/`XHOME_PASSWORD`, `XHOME_TOKEN`, or the OpenClaw
+`authProfiles.xhome` profile, then calls the REST live-token endpoint. The
+native IoT host defaults from `--region`; override `--native-iot-host` only for
+testing.
 
 Add `--send-start` to deliberately send command `20` about one second after
 login, matching the Android app's live-view timing. Command `21` is sent before
@@ -64,8 +71,7 @@ runs; command `21` is sent only after the UDP/KCP probe exits.
 ```bash
 python -m xhome.live_sidecar cloud-probe \
   --uid LSV212PFJU5TQT42R3UX \
-  --token ... \
-  --native-iot-host usaiotd.lancens.com \
+  --region usa \
   --send-start \
   --p2p-rendezvous \
   --relay-only \
@@ -126,8 +132,7 @@ device has been publishing assembled JPEG frames. Start a temporary sidecar URL:
 ```bash
 python -m xhome.live_sidecar mjpeg-server \
   --uid LSV212PFJU5TQT42R3UX \
-  --token ... \
-  --native-iot-host usaiotd.lancens.com \
+  --region usa \
   --bind 0.0.0.0 \
   --port 8088 \
   --path /xhome.mjpeg \

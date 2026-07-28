@@ -33,7 +33,14 @@ from xhome.live_p2p import (
     parse_client_connect_responses,
 )
 from xhome.live_pcap import extract_pcap_media
-from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks, unique_p2p_relays
+from xhome.live_sidecar import (
+    LatestJpegBuffer,
+    build_parser,
+    encode_callback_record,
+    iter_callback_records,
+    relay_callbacks,
+    unique_p2p_relays,
+)
 from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
     decode_native_frame_header,
@@ -210,6 +217,33 @@ class LiveSidecarTests(unittest.TestCase):
 
             self.assertEqual(stats.jpeg_frames, 1)
             self.assertEqual((jpeg_dir / "frame-000001.jpg").read_bytes(), b"\xff\xd8\xff\xd9")
+
+    def test_cloud_probe_can_fetch_live_token_when_token_is_omitted(self):
+        args = build_parser().parse_args(
+            [
+                "cloud-probe",
+                "--uid",
+                "LSV212PFJU5TQT42R3UX",
+                "--region",
+                "usa",
+                "--no-secrets",
+                "--duration",
+                "1",
+            ]
+        )
+
+        self.assertIsNone(args.token)
+        self.assertEqual(args.region, "usa")
+
+    def test_latest_jpeg_buffer_returns_new_frame_once(self):
+        frames = LatestJpegBuffer()
+        frames.update(b"\xff\xd8first")
+
+        first = frames.wait_next(0, timeout=0)
+        repeated = frames.wait_next(first[0], timeout=0) if first else None
+
+        self.assertEqual(first, (1, b"\xff\xd8first"))
+        self.assertIsNone(repeated)
 
 
 class LiveTransportTests(unittest.TestCase):

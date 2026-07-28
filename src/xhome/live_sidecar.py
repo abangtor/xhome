@@ -4,26 +4,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import struct
 import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from collections.abc import Iterator
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import urlsplit
 
-from .client import unwrap_response
+from .client import XHomeClient, unwrap_response
 from .constants import normalize_region
 from .live import (
     MEDIA_HEADER_BYTES,
     ControlCommand,
-    LiveCallback,
     LiveAppMediaFrame,
+    LiveCallback,
     LiveSessionMetadata,
     MediaType,
     callback_to_media_frame,
@@ -32,6 +33,7 @@ from .live import (
 from .live_p2p import XHomeP2PProbe, XHomeP2PRendezvousProbe
 from .live_pcap import extract_pcap_media
 from .live_transport import XHomeLiveCloudTransport, extract_p2p_servers
+from .secrets import load_openclaw_auth_profile
 
 RECORD_MAGIC = b"XHF1"
 RECORD_HEADER = struct.Struct("<4siiiI")
@@ -111,8 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     mjpeg = subparsers.add_parser("mjpeg-server", help="Serve the portable live JPEG stream as MJPEG over HTTP")
     mjpeg.add_argument("--uid", required=True)
-    mjpeg.add_argument("--token", required=True)
-    mjpeg.add_argument("--native-iot-host", required=True)
+    mjpeg.add_argument("--token", help="Existing native live token; fetched automatically if omitted")
+    mjpeg.add_argument("--native-iot-host", help="Native IoT host; defaults from --region if omitted")
+    add_rest_auth_args(mjpeg)
     mjpeg.add_argument("--bind", default="0.0.0.0")
     mjpeg.add_argument("--port", type=int, default=8088)
     mjpeg.add_argument("--path", default="/xhome.mjpeg")
@@ -133,8 +136,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     probe = subparsers.add_parser("cloud-probe", help="Probe the portable native-IoT TLS login phase")
     probe.add_argument("--uid", required=True)
-    probe.add_argument("--token", required=True)
-    probe.add_argument("--native-iot-host", required=True)
+    probe.add_argument("--token", help="Existing native live token; fetched automatically if omitted")
+    probe.add_argument("--native-iot-host", help="Native IoT host; defaults from --region if omitted")
+    add_rest_auth_args(probe)
     probe.add_argument("--duration", type=float, default=5.0)
     probe.add_argument("--timeout", type=float, default=10.0)
     probe.add_argument("--send-start", action="store_true", help="Send command 20 after login, then command 21 before exit")
@@ -177,6 +181,26 @@ def build_parser() -> argparse.ArgumentParser:
     probe.set_defaults(func=cmd_cloud_probe)
 
     return parser
+
+
+def add_rest_auth_args(parser: argparse.ArgumentParser) -> None:
+    """Add REST-auth options for commands that can fetch their own live token."""
+
+    parser.add_argument("--region", default=os.getenv("XHOME_REGION"))
+    parser.add_argument("--base-url", default=os.getenv("XHOME_BASE_URL"))
+    parser.add_argument("--account-token", default=os.getenv("XHOME_TOKEN"), help="Existing REST account token")
+    parser.add_argument("--user-id", default=os.getenv("XHOME_USER_ID"))
+    parser.add_argument("--username", default=os.getenv("XHOME_USERNAME"))
+    parser.add_argument("--password", default=os.getenv("XHOME_PASSWORD"))
+    parser.add_argument("--profile", default=os.getenv("XHOME_PROFILE", "xhome"), help="OpenClaw auth profile name")
+    parser.add_argument("--secrets-file", default=os.getenv("OPENCLAW_SECRETS_FILE"), help="OpenClaw secrets file path")
+    parser.add_argument("--no-secrets", action="store_true", help="Do not read OpenClaw secrets.json")
+
+
+def stored_profile(args: argparse.Namespace) -> dict[str, Any]:
+    if args.no_secrets:
+        return {}
+    return load_openclaw_auth_profile(args.profile, secrets_file=args.secrets_file)
 
 
 def cmd_relay(args: argparse.Namespace) -> dict[str, Any]:
@@ -254,12 +278,39 @@ def cmd_pcap_extract(args: argparse.Namespace) -> dict[str, Any]:
     ).as_dict()
 
 
-def cmd_mjpeg_server(args: argparse.Namespace) -> None:
-    metadata = LiveSessionMetadata(
-        uid=args.uid,
-        token=args.token,
-        native_iot_host=args.native_iot_host,
+def live_metadata_from_args(args: argparse.Namespace) -> LiveSessionMetadata:
+    """Return native live metadata, fetching a fresh live token when needed."""
+
+    profile = stored_profile(args)
+    region = normalize_region(args.region or profile.get("region") or "china")
+    native_iot_host = args.native_iot_host or region.native_iot_host
+    if args.token:
+        return LiveSessionMetadata(uid=args.uid, token=args.token, native_iot_host=native_iot_host)
+
+    client = XHomeClient(
+        region=region,
+        base_url=args.base_url,
+        token=args.account_token or profile.get("token"),
+        user_id=args.user_id or profile.get("user_id"),
+        timeout=args.timeout,
     )
+    if not client.token:
+        username = args.username or profile.get("username")
+        password = args.password or profile.get("password")
+        if not username or not password:
+            raise ValueError(
+                "Pass --token, set XHOME_TOKEN, set XHOME_USERNAME/XHOME_PASSWORD, "
+                "or store authProfiles.xhome in OpenClaw secrets."
+            )
+        client.login(username, password)
+    payload = unwrap_response(client.get_device_token(uid=args.uid))
+    if not isinstance(payload, dict):
+        raise ValueError("Live-token endpoint returned an unexpected payload")
+    return live_session_from_token_payload(uid=args.uid, native_iot_host=native_iot_host, payload=payload)
+
+
+def cmd_mjpeg_server(args: argparse.Namespace) -> None:
+    metadata = live_metadata_from_args(args)
     frames = LatestJpegBuffer()
 
     worker = threading.Thread(
@@ -406,11 +457,7 @@ def cmd_helper_contract(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
-    metadata = LiveSessionMetadata(
-        uid=args.uid,
-        token=args.token,
-        native_iot_host=args.native_iot_host,
-    )
+    metadata = live_metadata_from_args(args)
     p2p_probe = None
     p2p_rendezvous = None
     started = False
