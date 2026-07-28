@@ -16,13 +16,6 @@ class HomeAssistantServiceTests(unittest.TestCase):
         service_names = [
             "list_devices",
             "get_screen_light_config",
-            "set_screen_light_timeout",
-            "set_battery_display",
-            "set_weather_forecast",
-            "set_call_screen",
-            "set_standby_mode",
-            "set_target_ev",
-            "set_remote_unlock_limit",
             "get_app_lock_status",
             "set_unlock_type",
             "list_lock_members",
@@ -38,6 +31,24 @@ class HomeAssistantServiceTests(unittest.TestCase):
             with self.subTest(service=service):
                 self.assertIn(f'"{service}"', init_source)
                 self.assertIn(f"{service}:", services_yaml)
+
+    def test_entity_backed_setting_services_are_not_registered(self):
+        init_source = INIT_PATH.read_text()
+        services_yaml = SERVICES_PATH.read_text()
+        service_names = [
+            "set_screen_light_timeout",
+            "set_battery_display",
+            "set_weather_forecast",
+            "set_call_screen",
+            "set_standby_mode",
+            "set_target_ev",
+            "set_remote_unlock_limit",
+        ]
+
+        for service in service_names:
+            with self.subTest(service=service):
+                self.assertNotIn(f'"{service}"', init_source)
+                self.assertNotIn(f"{service}:", services_yaml)
 
     def test_access_changing_temporary_password_services_require_confirmation(self):
         init_source = INIT_PATH.read_text()

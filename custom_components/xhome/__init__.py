@@ -21,7 +21,6 @@ CONF_BEGIN_TIME = "begin_time"
 CONF_CONFIG_ENTRY_ID = "config_entry_id"
 CONF_CONFIRM = "confirm"
 CONF_DATA = "data"
-CONF_ENABLED = "enabled"
 CONF_END_TIME = "end_time"
 CONF_ENTRY = "entry"
 CONF_EVENT_USER_ID = "event_user_id"
@@ -34,14 +33,10 @@ CONF_NAME = "name"
 CONF_RAND_KEY = "rand_key"
 CONF_REMARKS = "remarks"
 CONF_SDK = "sdk"
-CONF_STANDBY_MODE = "standby_mode"
 CONF_START_TIME = "start_time"
 CONF_STOP_TIME = "stop_time"
-CONF_TARGET_EV = "target_ev"
-CONF_TIMEOUT_SECONDS = "timeout_seconds"
 CONF_TOTAL_TIMES = "total_times"
 CONF_UID = "uid"
-CONF_UNLOCK_LIMIT = "unlock_limit"
 CONF_UNLOCK_TYPE = "unlock_type"
 CONF_USER_TYPE = "user_type"
 CONF_WEEK = "week"
@@ -54,14 +49,7 @@ SERVICE_LIST_DEVICES = "list_devices"
 SERVICE_LIST_LOCK_MEMBERS = "list_lock_members"
 SERVICE_LIST_TEMPORARY_PASSWORDS = "list_temporary_passwords"
 SERVICE_RENAME_TEMPORARY_PASSWORD = "rename_temporary_password"
-SERVICE_SET_BATTERY_DISPLAY = "set_battery_display"
-SERVICE_SET_CALL_SCREEN = "set_call_screen"
-SERVICE_SET_REMOTE_UNLOCK_LIMIT = "set_remote_unlock_limit"
-SERVICE_SET_SCREEN_LIGHT_TIMEOUT = "set_screen_light_timeout"
-SERVICE_SET_STANDBY_MODE = "set_standby_mode"
-SERVICE_SET_TARGET_EV = "set_target_ev"
 SERVICE_SET_UNLOCK_TYPE = "set_unlock_type"
-SERVICE_SET_WEATHER_FORECAST = "set_weather_forecast"
 SERVICE_UPDATE_EVENT_MEMBER = "update_event_member"
 SERVICE_UPSERT_LOCK_MEMBER = "upsert_lock_member"
 
@@ -121,90 +109,6 @@ def _register_api_services(hass: HomeAssistant) -> None:
                 }
             )
         return {"devices": devices}
-
-    async def handle_set_screen_light_timeout(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "screen light timeout",
-            "set_screen_light_timeout",
-            call.data[CONF_UID],
-            call.data[CONF_TIMEOUT_SECONDS],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_battery_display(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "battery display",
-            "set_battery_display",
-            call.data[CONF_UID],
-            call.data[CONF_ENABLED],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_weather_forecast(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "weather forecast",
-            "set_wet_play",
-            call.data[CONF_UID],
-            call.data[CONF_ENABLED],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_call_screen(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "call screen",
-            "set_call_screen",
-            call.data[CONF_UID],
-            call.data[CONF_ENABLED],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_standby_mode(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "standby mode",
-            "set_standby_mode",
-            call.data[CONF_UID],
-            call.data[CONF_STANDBY_MODE],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_target_ev(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "target EV",
-            "set_target_ev",
-            call.data[CONF_UID],
-            call.data[CONF_TARGET_EV],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
-
-    async def handle_set_remote_unlock_limit(call: ServiceCall) -> dict[str, Any]:
-        return await _call_client_response(
-            hass,
-            call,
-            "remote unlock limit",
-            "set_remote_unlock_limit",
-            call.data[CONF_UID],
-            call.data[CONF_UNLOCK_LIMIT],
-            uid=call.data[CONF_UID],
-            refresh=True,
-        )
 
     async def handle_get_app_lock_status(call: ServiceCall) -> dict[str, Any]:
         return await _call_client_response(
@@ -353,48 +257,6 @@ def _register_api_services(hass: HomeAssistant) -> None:
         handle_get_screen_light_config,
         _UID_SCHEMA,
         SupportsResponse.ONLY,
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_SCREEN_LIGHT_TIMEOUT,
-        handle_set_screen_light_timeout,
-        {**_UID_SCHEMA, vol.Required(CONF_TIMEOUT_SECONDS): vol.All(vol.Coerce(int), vol.Range(min=5, max=60))},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_BATTERY_DISPLAY,
-        handle_set_battery_display,
-        {**_UID_SCHEMA, vol.Required(CONF_ENABLED): cv.boolean},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_WEATHER_FORECAST,
-        handle_set_weather_forecast,
-        {**_UID_SCHEMA, vol.Required(CONF_ENABLED): cv.boolean},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_CALL_SCREEN,
-        handle_set_call_screen,
-        {**_UID_SCHEMA, vol.Required(CONF_ENABLED): cv.boolean},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_STANDBY_MODE,
-        handle_set_standby_mode,
-        {**_UID_SCHEMA, vol.Required(CONF_STANDBY_MODE): vol.Coerce(int)},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_TARGET_EV,
-        handle_set_target_ev,
-        {**_UID_SCHEMA, vol.Required(CONF_TARGET_EV): vol.All(vol.Coerce(int), vol.Range(min=0))},
-    )
-    _register_service(
-        hass,
-        SERVICE_SET_REMOTE_UNLOCK_LIMIT,
-        handle_set_remote_unlock_limit,
-        {**_UID_SCHEMA, vol.Required(CONF_UNLOCK_LIMIT): vol.All(vol.Coerce(int), vol.Range(min=0))},
     )
     _register_service(
         hass,
