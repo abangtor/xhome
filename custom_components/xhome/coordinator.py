@@ -624,17 +624,16 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                     self._local_push_client = None
 
     def _new_worker_client(self) -> XHomeClient:
-        """Return a separately authenticated client for the push worker thread."""
+        """Return a push worker client using the coordinator's active token."""
 
-        client = XHomeClient(
+        self._ensure_login()
+
+        return XHomeClient(
             region=_entry_region(self.config_entry),
+            token=self.client.require_token(),
+            user_id=self.client.require_user_id(),
             timeout=self.config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         )
-        client.login(
-            self.config_entry.data[CONF_USERNAME],
-            self.config_entry.data[CONF_PASSWORD],
-        )
-        return client
 
     def _handle_local_push_message(self, client: XHomeClient, message: XHomePushMessage) -> None:
         """Handle one parsed native push message from the worker thread."""
@@ -666,7 +665,14 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Synchronous data update helper."""
 
         self._ensure_login()
-        payload = self.client.list_devices_resilient()
+        try:
+            payload = self.client.list_devices_resilient()
+        except XHomeAPIError as err:
+            if not _is_no_user_error(err):
+                raise
+            self.client.token = None
+            self._ensure_login()
+            payload = self.client.list_devices_resilient()
         devices = self.client.flatten_devices(payload)
         runtime_devices: dict[str, XHomeDeviceRuntimeData] = {}
 
@@ -1000,6 +1006,13 @@ def _entry_region(config_entry: ConfigEntry) -> str:
     """Return the active region, allowing options to override old entry data."""
 
     return config_entry.options.get(CONF_REGION) or config_entry.data.get(CONF_REGION, DEFAULT_REGION)
+
+
+def _is_no_user_error(err: XHomeAPIError) -> bool:
+    """Return whether the API rejected the current token as having no user."""
+
+    payload = err.payload
+    return err.status_code == 400 and isinstance(payload, dict) and payload.get("message") == "no user"
 
 
 def _event_sort_key(event: dict[str, Any]) -> tuple[int, str]:
