@@ -61,6 +61,14 @@ The remaining implementation layer is KCP itself: native uses conversation
 `nodelay(1, 10, 2, 1)`. Once that is wired, channel 2 should carry the 40-byte
 XHome media-header records that can be stripped to H.264/G.711/JPEG.
 
+The sidecar includes a KCP channel wrapper for those recovered parameters. The
+compiled KCP dependency is intentionally optional and is not part of the Home
+Assistant integration requirements:
+
+```bash
+pip install "xhome-api[live]"
+```
+
 ## Callback Capture Format
 
 The older `relay` and `strip-callbacks` commands are kept as a capture/debugging

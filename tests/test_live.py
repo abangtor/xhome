@@ -15,7 +15,7 @@ from xhome.live import (
     live_session_from_token_payload,
     parse_media_frame,
 )
-from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks, unique_p2p_relays
+from xhome.live_kcp import CONTROL_CONV_ID, MEDIA_CONV_ID, XHomeKcpChannels, strip_uid_suffix
 from xhome.live_p2p import (
     P2PAddressKind,
     P2PPacketType,
@@ -28,6 +28,7 @@ from xhome.live_p2p import (
     encode_udp_packet,
     parse_client_connect_responses,
 )
+from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks, unique_p2p_relays
 from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
     decode_native_frame_header,
@@ -237,6 +238,82 @@ class LiveTransportTests(unittest.TestCase):
         )
 
         self.assertEqual(relays, [("8.222.151.25", 9729), ("8.222.151.26", 9729)])
+
+
+class FakeKCP:
+    def __init__(self, conv_id, identity_token):
+        self.conv_id = conv_id
+        self.identity_token = identity_token
+        self.outbound = None
+        self.received = []
+        self.updated = False
+
+    def include_outbound_handler(self, handler):
+        self.outbound = handler
+
+    def enqueue(self, payload):
+        self.pending = payload
+
+    def flush(self):
+        self.outbound(self, b"kcp:" + self.pending)
+
+    def receive(self, payload):
+        self.received.append(payload)
+
+    def get_all_received(self):
+        pending = self.received
+        self.received = []
+        return pending
+
+    def update(self, timestamp_ms=None):
+        self.updated = True
+
+
+class LiveKcpTests(unittest.TestCase):
+    def test_kcp_channels_wrap_outbound_segments_in_relay_tunnel_packets(self):
+        sent = []
+        conv_ids = []
+
+        def factory(conv_id, identity_token):
+            conv_ids.append(conv_id)
+            return FakeKCP(conv_id, identity_token)
+
+        channels = XHomeKcpChannels(
+            uid="LSV212PFJU5TQT42R3UX",
+            send_udp=sent.append,
+            relay_tunnel=True,
+            kcp_factory=factory,
+        )
+
+        channels.send_media(b"payload")
+        packet = decode_udp_packet(sent[0])
+
+        self.assertEqual(conv_ids, [CONTROL_CONV_ID, MEDIA_CONV_ID])
+        self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
+        self.assertEqual(packet.channel, 2)
+        self.assertEqual(packet.payload, b"kcp:payloadLSV212PFJU5TQT42R3UX")
+
+    def test_kcp_channels_route_inbound_media_packets(self):
+        channels = XHomeKcpChannels(
+            uid="LSV212PFJU5TQT42R3UX",
+            send_udp=lambda _data: None,
+            relay_tunnel=True,
+            kcp_factory=lambda conv_id, identity_token: FakeKCP(conv_id, identity_token),
+        )
+        packet = decode_udp_packet(
+            encode_kcp_udp_packet(
+                P2PPacketType.DIRECT_KCP_DATA,
+                b"frame",
+                channel=2,
+                uid_suffix="LSV212PFJU5TQT42R3UX",
+            )
+        )
+
+        self.assertEqual(channels.receive_packet(packet), [(2, b"frame")])
+
+    def test_strip_uid_suffix_only_when_present(self):
+        self.assertEqual(strip_uid_suffix(b"abcLSV", "LSV"), b"abc")
+        self.assertEqual(strip_uid_suffix(b"abc", "LSV"), b"abc")
 
 
 if __name__ == "__main__":

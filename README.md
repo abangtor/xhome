@@ -250,6 +250,13 @@ with P2P relay addresses, talk to the returned UDP relay, parse peer candidates,
 and run the native-shaped UDP rendezvous probe. KCP/media relay is still the
 remaining streaming layer. See `docs/XHOME_LIVE_SIDECAR.md`.
 
+The KCP wrapper is included in the Python package, but the compiled KCP binding
+is optional and not installed by Home Assistant:
+
+```bash
+pip install "xhome-api[live]"
+```
+
 ## Development Roadmap
 
 1. Harden the config flow and coordinator with Home Assistant test coverage.
