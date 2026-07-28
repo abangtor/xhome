@@ -50,6 +50,7 @@ SERVICE_ADD_TEMPORARY_PASSWORD_RAW = "add_temporary_password_raw"
 SERVICE_DELETE_TEMPORARY_PASSWORD = "delete_temporary_password"
 SERVICE_GET_APP_LOCK_STATUS = "get_app_lock_status"
 SERVICE_GET_SCREEN_LIGHT_CONFIG = "get_screen_light_config"
+SERVICE_LIST_DEVICES = "list_devices"
 SERVICE_LIST_LOCK_MEMBERS = "list_lock_members"
 SERVICE_LIST_TEMPORARY_PASSWORDS = "list_temporary_passwords"
 SERVICE_RENAME_TEMPORARY_PASSWORD = "rename_temporary_password"
@@ -98,6 +99,28 @@ def _register_api_services(hass: HomeAssistant) -> None:
             call.data[CONF_UID],
             uid=call.data[CONF_UID],
         )
+
+    async def handle_list_devices(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_service(hass, call)
+        if coordinator.data is None:
+            await coordinator.async_request_refresh()
+        if coordinator.data is None:
+            raise HomeAssistantError("XHome device data is unavailable")
+
+        devices = []
+        for data in coordinator.data.devices.values():
+            devices.append(
+                {
+                    "name": data.name,
+                    "uid": data.uid,
+                    "device_id": data.device_id,
+                    "model": data.model,
+                    "online_type": data.first("online_type", "onlineType"),
+                    "battery": data.first("battery", "bat"),
+                    "rssi": data.first("rssi", "wifi_rssi"),
+                }
+            )
+        return {"devices": devices}
 
     async def handle_set_screen_light_timeout(call: ServiceCall) -> dict[str, Any]:
         return await _call_client_response(
@@ -317,6 +340,13 @@ def _register_api_services(hass: HomeAssistant) -> None:
             uid=call.data[CONF_UID],
         )
 
+    _register_service(
+        hass,
+        SERVICE_LIST_DEVICES,
+        handle_list_devices,
+        _OPTIONAL_CONFIG_ENTRY,
+        SupportsResponse.ONLY,
+    )
     _register_service(
         hass,
         SERVICE_GET_SCREEN_LIGHT_CONFIG,

@@ -2,6 +2,14 @@ refresh:
   name: Refresh
   description: Refresh XHome cloud data for this integration.
 
+list_devices:
+  name: List devices
+  description: Return loaded XHome devices with full uid values for use in other XHome actions.
+  fields:
+    config_entry_id:
+      selector:
+        text:
+
 get_screen_light_config:
   name: Get screen light config
   description: Return the screen-light configuration for one XHome device.

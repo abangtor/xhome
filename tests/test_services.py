@@ -14,6 +14,7 @@ class HomeAssistantServiceTests(unittest.TestCase):
         init_source = INIT_PATH.read_text()
         services_yaml = SERVICES_PATH.read_text()
         service_names = [
+            "list_devices",
             "get_screen_light_config",
             "set_screen_light_timeout",
             "set_battery_display",
