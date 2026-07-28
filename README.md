@@ -61,10 +61,12 @@ The integration vendors its XHome REST API client under
 `pip install -e .` step.
 
 The repository includes the APK launcher icon as local brand assets under
-`icon.png` for the HACS repository listing,
-`custom_components/xhome/brand/icon.png` for HACS validation, and
-`custom_components/xhome/icon.png` for tooling that looks beside the
-integration manifest.
+`brand/icon.png` and `brand/logo.png` for HACS repository validation,
+`custom_components/xhome/brand/icon.png` and
+`custom_components/xhome/brand/logo.png` for Home Assistant's local custom
+integration brand loader, plus `custom_components/xhome/icon.png` and
+repository-root `icon.png` for older tooling that looks beside the manifest or
+repository root.
 
 ### Manual Install
 
