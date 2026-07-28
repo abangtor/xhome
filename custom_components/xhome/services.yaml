@@ -10,6 +10,14 @@ list_devices:
       selector:
         text:
 
+local_push_status:
+  name: Local push status
+  description: Return the local push listener connection, token-registration, and event counters.
+  fields:
+    config_entry_id:
+      selector:
+        text:
+
 get_screen_light_config:
   name: Get screen light config
   description: Return the screen-light configuration for one XHome device.

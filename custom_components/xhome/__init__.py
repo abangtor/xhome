@@ -49,6 +49,7 @@ SERVICE_GET_APP_LOCK_STATUS = "get_app_lock_status"
 SERVICE_GET_SCREEN_LIGHT_CONFIG = "get_screen_light_config"
 SERVICE_LIST_DEVICES = "list_devices"
 SERVICE_LIST_LOCK_MEMBERS = "list_lock_members"
+SERVICE_LOCAL_PUSH_STATUS = "local_push_status"
 SERVICE_LIST_TEMPORARY_PASSWORDS = "list_temporary_passwords"
 SERVICE_PREPARE_LIVE_STREAM = "prepare_live_stream"
 SERVICE_RENAME_TEMPORARY_PASSWORD = "rename_temporary_password"
@@ -112,6 +113,10 @@ def _register_api_services(hass: HomeAssistant) -> None:
                 }
             )
         return {"devices": devices}
+
+    async def handle_local_push_status(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_service(hass, call)
+        return coordinator.local_push_status()
 
     async def handle_get_app_lock_status(call: ServiceCall) -> dict[str, Any]:
         return await _call_client_response(
@@ -291,6 +296,13 @@ def _register_api_services(hass: HomeAssistant) -> None:
         hass,
         SERVICE_LIST_DEVICES,
         handle_list_devices,
+        _OPTIONAL_CONFIG_ENTRY,
+        SupportsResponse.ONLY,
+    )
+    _register_service(
+        hass,
+        SERVICE_LOCAL_PUSH_STATUS,
+        handle_local_push_status,
         _OPTIONAL_CONFIG_ENTRY,
         SupportsResponse.ONLY,
     )

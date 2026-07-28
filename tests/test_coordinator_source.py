@@ -25,6 +25,14 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn("user_id=self.client.require_user_id()", source)
         self.assertNotIn(".login(", source)
 
+    def test_local_push_worker_tracks_runtime_status(self):
+        source = COORDINATOR_PATH.read_text()
+
+        self.assertIn("def local_push_status", source)
+        self.assertIn('"registered_token_tail"', source)
+        self.assertIn('"last_frame_command"', source)
+        self.assertIn('"events"', source)
+
     def test_device_refresh_retries_no_user_by_refreshing_token(self):
         source = _function_source("_update_data")
 

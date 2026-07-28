@@ -201,6 +201,22 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._downloaded_event_media: dict[str, XHomeDownloadedEventMedia] = {}
         self._local_push_client: XHomePushClient | None = None
         self._local_push_registered_token: str | None = None
+        self._local_push_status: dict[str, Any] = {
+            "enabled": config_entry.options.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
+            "running": False,
+            "connected": False,
+            "registered": False,
+            "frames": 0,
+            "tokens": 0,
+            "events": 0,
+            "reconnects": 0,
+            "last_error": None,
+            "last_frame_command": None,
+            "last_frame_kind": None,
+            "last_frame_at": None,
+            "last_event_at": None,
+            "registered_token_tail": None,
+        }
         super().__init__(
             hass,
             LOGGER,
@@ -224,8 +240,10 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Start the native push socket listener."""
 
         if not self.config_entry.options.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED):
+            self._local_push_status.update({"enabled": False, "running": False, "connected": False})
             return _noop
 
+        self._local_push_status.update({"enabled": True, "running": True, "last_error": None})
         stop_event = Event()
         thread = Thread(
             target=self._local_push_worker,
@@ -240,8 +258,14 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             if self._local_push_client is not None:
                 self._local_push_client.close()
             thread.join(timeout=2)
+            self._local_push_status.update({"running": False, "connected": False})
 
         return stop_local_push
+
+    def local_push_status(self) -> dict[str, Any]:
+        """Return local push worker status and counters."""
+
+        return dict(self._local_push_status)
 
     async def async_seed_events(self) -> None:
         """Seed the event dedupe cache without firing historical events."""
@@ -634,16 +658,40 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                     ),
                 )
                 self._local_push_client = push_client
+                self._local_push_status.update({"running": True, "last_error": None})
                 for message in push_client.iter_messages(stop_event=stop_event):
                     if stop_event.is_set():
                         break
+                    self._local_push_status.update(
+                        {
+                            "connected": True,
+                            "frames": int(self._local_push_status["frames"]) + 1,
+                            "last_frame_command": message.command,
+                            "last_frame_kind": message.kind,
+                            "last_frame_at": int(time.time()),
+                        }
+                    )
+                    LOGGER.debug(
+                        "XHome local push frame command=%s kind=%s payload_length=%s",
+                        message.command,
+                        message.kind,
+                        len(message.payload),
+                    )
                     self._handle_local_push_message(client, message)
                 backoff = 2
             except XHomeAuthError as err:
+                self._local_push_status.update({"connected": False, "last_error": str(err)})
                 LOGGER.warning("XHome local push authentication failed: %s", err)
                 stop_event.wait(60)
             except (XHomePushError, XHomeAPIError, XHomeError, OSError, TimeoutError, ValueError) as err:
                 if not stop_event.is_set():
+                    self._local_push_status.update(
+                        {
+                            "connected": False,
+                            "reconnects": int(self._local_push_status["reconnects"]) + 1,
+                            "last_error": str(err),
+                        }
+                    )
                     LOGGER.debug("XHome local push listener reconnecting after failure: %s", err)
                     stop_event.wait(backoff)
                     backoff = min(backoff * 2, 60)
@@ -651,6 +699,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 if self._local_push_client is not None:
                     self._local_push_client.close()
                     self._local_push_client = None
+                self._local_push_status["connected"] = False
 
     def _new_worker_client(self) -> XHomeClient:
         """Return a push worker client using the coordinator's active token."""
@@ -668,9 +717,16 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Handle one parsed native push message from the worker thread."""
 
         if message.kind == "token" and message.token:
+            self._local_push_status["tokens"] = int(self._local_push_status["tokens"]) + 1
             self._register_local_push_token(client, message.token)
             return
         if message.kind == "event" and message.event:
+            self._local_push_status.update(
+                {
+                    "events": int(self._local_push_status["events"]) + 1,
+                    "last_event_at": int(time.time()),
+                }
+            )
             self.hass.add_job(self.async_handle_local_push_event, message.event)
 
     def _register_local_push_token(self, client: XHomeClient, push_token: str) -> None:
@@ -688,7 +744,13 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             phone_model="xhome-api",
         )
         self._local_push_registered_token = push_token
-        LOGGER.debug("Registered XHome local push token")
+        self._local_push_status.update(
+            {
+                "registered": True,
+                "registered_token_tail": f"...{push_token[-6:]}",
+            }
+        )
+        LOGGER.info("Registered XHome local push token")
 
     def _update_data(self) -> XHomeCoordinatorData:
         """Synchronous data update helper."""

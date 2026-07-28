@@ -15,6 +15,7 @@ class HomeAssistantServiceTests(unittest.TestCase):
         services_yaml = SERVICES_PATH.read_text()
         service_names = [
             "list_devices",
+            "local_push_status",
             "get_screen_light_config",
             "get_app_lock_status",
             "set_unlock_type",
