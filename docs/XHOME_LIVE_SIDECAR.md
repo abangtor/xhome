@@ -118,6 +118,34 @@ KCP conversation id `0x11223345`, KCP push command `81`, then command-`8`
 app-media fragments. The observed live-view window yielded JPEG frames
 (`media_type=165`), not H.264.
 
+## MJPEG Debug Server
+
+For the current receive path, the practical stream surface is MJPEG because the
+device has been publishing assembled JPEG frames. Start a temporary sidecar URL:
+
+```bash
+python -m xhome.live_sidecar mjpeg-server \
+  --uid LSV212PFJU5TQT42R3UX \
+  --token ... \
+  --native-iot-host usaiotd.lancens.com \
+  --bind 0.0.0.0 \
+  --port 8088 \
+  --path /xhome.mjpeg \
+  --duration 3600 \
+  --insecure-skip-verify
+```
+
+Then configure the Home Assistant XHome option `Live stream URL template` to a
+URL such as:
+
+```text
+http://SIDECAR_HOST:8088/xhome.mjpeg
+```
+
+`mjpeg-server` defaults to relay-only mode, matching the first successful live
+test from the Home Assistant side. Use `--direct-punch` only when testing local
+or public peer candidates deliberately.
+
 ## Callback Capture Format
 
 The older `relay` and `strip-callbacks` commands are kept as a capture/debugging

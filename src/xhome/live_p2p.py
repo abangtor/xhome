@@ -12,7 +12,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
-from .live import LiveAppMediaAssembler, MediaType, parse_live_app_media_packet
+from .live import LiveAppMediaAssembler, LiveAppMediaFrame, MediaType, parse_live_app_media_packet
 from .live_transport import decode_native_frame_header, encode_native_frame
 
 UDP_HEADER = struct.Struct("<HHH")
@@ -345,6 +345,7 @@ class XHomeP2PRendezvousProbe:
         h264_out: Path | None = None,
         g711_out: Path | None = None,
         jpeg_dir: Path | None = None,
+        on_frame: Callable[[LiveAppMediaFrame], None] | None = None,
         on_ready: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -375,7 +376,14 @@ class XHomeP2PRendezvousProbe:
                 "kcp_start": 0,
             }
             kcp_probe = KcpStartProbe(uid=self.uid, sock=sock, start_command=kcp_start_command)
-            media_probe = KcpMediaProbe(uid=self.uid, sock=sock, h264_out=h264_out, g711_out=g711_out, jpeg_dir=jpeg_dir)
+            media_probe = KcpMediaProbe(
+                uid=self.uid,
+                sock=sock,
+                h264_out=h264_out,
+                g711_out=g711_out,
+                jpeg_dir=jpeg_dir,
+                on_frame=on_frame,
+            )
             next_kcp_start = 0.0
             next_discovery = 0.0
             next_relay_touch = 0.0
@@ -607,10 +615,12 @@ class KcpMediaProbe:
         h264_out: Path | None = None,
         g711_out: Path | None = None,
         jpeg_dir: Path | None = None,
+        on_frame: Callable[[LiveAppMediaFrame], None] | None = None,
     ) -> None:
         self.uid = uid
         self.sock = sock
         self.jpeg_dir = jpeg_dir
+        self.on_frame = on_frame
         self.h264_stream = open_output(h264_out)
         self.g711_stream = open_output(g711_out)
         if self.jpeg_dir:
@@ -707,6 +717,8 @@ class KcpMediaProbe:
         if frame is None:
             return
         self.frames += 1
+        if self.on_frame is not None:
+            self.on_frame(frame)
         if frame.media_type in {MediaType.H264_I_FRAME, MediaType.H264_P_FRAME, MediaType.H264_B_FRAME}:
             self.h264_frames += 1
             if self.h264_stream is not None:

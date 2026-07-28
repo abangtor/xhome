@@ -8,11 +8,14 @@ import shlex
 import struct
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import urlsplit
 
 from .client import unwrap_response
 from .constants import normalize_region
@@ -20,7 +23,9 @@ from .live import (
     MEDIA_HEADER_BYTES,
     ControlCommand,
     LiveCallback,
+    LiveAppMediaFrame,
     LiveSessionMetadata,
+    MediaType,
     callback_to_media_frame,
     live_session_from_token_payload,
 )
@@ -103,6 +108,25 @@ def build_parser() -> argparse.ArgumentParser:
     pcap.add_argument("--g711-out", type=Path)
     pcap.add_argument("--jpeg-dir", type=Path)
     pcap.set_defaults(func=cmd_pcap_extract)
+
+    mjpeg = subparsers.add_parser("mjpeg-server", help="Serve the portable live JPEG stream as MJPEG over HTTP")
+    mjpeg.add_argument("--uid", required=True)
+    mjpeg.add_argument("--token", required=True)
+    mjpeg.add_argument("--native-iot-host", required=True)
+    mjpeg.add_argument("--bind", default="0.0.0.0")
+    mjpeg.add_argument("--port", type=int, default=8088)
+    mjpeg.add_argument("--path", default="/xhome.mjpeg")
+    mjpeg.add_argument("--duration", type=float, default=3600.0, help="Maximum native session duration in seconds")
+    mjpeg.add_argument("--timeout", type=float, default=10.0)
+    mjpeg.add_argument("--relay-only", action="store_true", default=True)
+    mjpeg.add_argument("--direct-punch", action="store_false", dest="relay_only")
+    mjpeg.add_argument("--jpeg-dir", type=Path, help="Optional debug copy of served JPEG frames")
+    mjpeg.add_argument(
+        "--insecure-skip-verify",
+        action="store_true",
+        help="Disable TLS certificate verification; native hosts may present mismatched certificates",
+    )
+    mjpeg.set_defaults(func=cmd_mjpeg_server)
 
     explain = subparsers.add_parser("helper-contract", help="Print the native-helper stdio protocol")
     explain.set_defaults(func=cmd_helper_contract)
@@ -228,6 +252,137 @@ def cmd_pcap_extract(args: argparse.Namespace) -> dict[str, Any]:
         g711_out=args.g711_out,
         jpeg_dir=args.jpeg_dir,
     ).as_dict()
+
+
+def cmd_mjpeg_server(args: argparse.Namespace) -> None:
+    metadata = LiveSessionMetadata(
+        uid=args.uid,
+        token=args.token,
+        native_iot_host=args.native_iot_host,
+    )
+    frames = LatestJpegBuffer()
+
+    worker = threading.Thread(
+        target=run_mjpeg_live_worker,
+        kwargs={
+            "metadata": metadata,
+            "frames": frames,
+            "duration": args.duration,
+            "timeout": args.timeout,
+            "relay_only": args.relay_only,
+            "jpeg_dir": args.jpeg_dir,
+            "verify_tls": not args.insecure_skip_verify,
+        },
+        daemon=True,
+    )
+    worker.start()
+
+    handler = build_mjpeg_handler(frames, args.path)
+    server = ThreadingHTTPServer((args.bind, args.port), handler)
+    print(json.dumps({"event": "mjpeg_server", "url": f"http://{args.bind}:{args.port}{args.path}"}), file=sys.stderr)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+def run_mjpeg_live_worker(
+    *,
+    metadata: LiveSessionMetadata,
+    frames: "LatestJpegBuffer",
+    duration: float,
+    timeout: float,
+    relay_only: bool,
+    jpeg_dir: Path | None,
+    verify_tls: bool,
+) -> None:
+    with XHomeLiveCloudTransport(metadata, timeout=timeout, verify_tls=verify_tls) as transport:
+        transport.login()
+        try:
+            native_frames = transport.read_available(duration=min(1.0, duration))
+            transport.send_frame(metadata.start_command)
+            native_frames.extend(transport.read_available(duration=min(3.0, duration)))
+            if not extract_p2p_servers(native_frames):
+                native_frames.extend(transport.read_available(duration=duration))
+            relays = unique_p2p_relays(extract_p2p_servers(native_frames))
+            if not relays:
+                raise RuntimeError("Native IoT session did not return any P2P relays")
+
+            def on_frame(frame: LiveAppMediaFrame) -> None:
+                if frame.media_type == MediaType.JPEG_FRAME:
+                    frames.update(frame.payload)
+
+            XHomeP2PRendezvousProbe(
+                uid=metadata.uid,
+                relays=relays,
+                direct_punch_enabled=not relay_only,
+            ).run(
+                duration=duration,
+                jpeg_dir=jpeg_dir,
+                on_frame=on_frame,
+            )
+        finally:
+            transport.send_frame(metadata.stop_command)
+
+
+class LatestJpegBuffer:
+    """Thread-safe holder for the latest live JPEG frame."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._sequence = 0
+        self._frame: bytes | None = None
+
+    def update(self, frame: bytes) -> None:
+        with self._condition:
+            self._sequence += 1
+            self._frame = frame
+            self._condition.notify_all()
+
+    def wait_next(self, last_sequence: int, *, timeout: float = 10.0) -> tuple[int, bytes] | None:
+        with self._condition:
+            if self._sequence <= last_sequence:
+                self._condition.wait(timeout=timeout)
+            if self._frame is None or self._sequence <= last_sequence:
+                return None
+            return self._sequence, self._frame
+
+
+def build_mjpeg_handler(frames: LatestJpegBuffer, path: str) -> type[BaseHTTPRequestHandler]:
+    expected_path = urlsplit(path).path or "/xhome.mjpeg"
+
+    class MjpegHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if urlsplit(self.path).path != expected_path:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=xhome")
+            self.end_headers()
+            sequence = 0
+            while True:
+                item = frames.wait_next(sequence)
+                if item is None:
+                    continue
+                sequence, frame = item
+                try:
+                    self.wfile.write(
+                        b"--xhome\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        + f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii")
+                        + frame
+                        + b"\r\n"
+                    )
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+        def log_message(self, format: str, *args: Any) -> None:
+            print(f"mjpeg: {format % args}", file=sys.stderr)
+
+    return MjpegHandler
 
 
 def cmd_helper_contract(args: argparse.Namespace) -> dict[str, Any]:
