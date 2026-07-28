@@ -26,6 +26,7 @@ Expose XHome door devices cleanly in Home Assistant:
 - Latest event image through a native Home Assistant image entity
 - Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
+- Live camera entity surface for an external native P2P/go2rtc bridge
 - Optional direct local push listener for near-real-time XHome events
 
 ## Planned Structure
@@ -152,6 +153,7 @@ implemented in the Python client and exposed as Home Assistant services:
 - `xhome.add_temporary_password_raw`
 - `xhome.rename_temporary_password`
 - `xhome.delete_temporary_password`
+- `xhome.prepare_live_stream`
 
 `add_temporary_password` reimplements the Android `IVIEWSPassword` encoder from
 `libIVIEWSPSD.so`: AES-CBC over the password using `uuid[4:20]` as key, a
@@ -215,8 +217,30 @@ only non-sensitive metadata and local media paths; signed OSS URLs are not
 exposed in entity state or diagnostics.
 
 This is event media, not a live camera stream or a command to start recording.
-Live viewing and active recording use the app's native P2P stack and are still
-out of scope for this REST-first integration.
+Live viewing and active recording use the app's native P2P stack.
+
+## Live streaming
+
+The integration now exposes a per-device `Live camera` entity as the Home
+Assistant-side surface for a future/native XHome P2P bridge. XHome live video is
+not a direct REST/HLS/RTSP URL; the Android app uses `libIVIEWSAVAPIs.so` to
+obtain H.264/G.711 frames and then decodes them locally.
+
+Set the integration option `Live stream URL template` to the stream URL produced
+by an external bridge or go2rtc, for example:
+
+```text
+rtsp://homeassistant.local:8554/xhome/{uid_tail}
+```
+
+Supported placeholders are `{uid}`, `{uid_tail}`, `{device_id}`, and `{model}`.
+The camera entity does not expose live tokens in state.
+
+For bridge development, call the response service `xhome.prepare_live_stream`
+with `uid` and `confirm: true`. It returns the live token, native IoT host, start
+command `20`, stop command `21`, codec names, and the 40-byte media header size
+needed by a sidecar. Treat that response like a secret; the live token is
+credential material.
 
 ## Development Roadmap
 

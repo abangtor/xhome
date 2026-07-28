@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CAMERA_PATH = ROOT / "custom_components" / "xhome" / "camera.py"
+CONST_PATH = ROOT / "custom_components" / "xhome" / "const.py"
+COORDINATOR_PATH = ROOT / "custom_components" / "xhome" / "coordinator.py"
+HACS_PATH = ROOT / "hacs.json"
+STRINGS_PATH = ROOT / "custom_components" / "xhome" / "strings.json"
+TRANSLATIONS_PATH = ROOT / "custom_components" / "xhome" / "translations" / "en.json"
+
+
+class LiveStreamSourceTests(unittest.TestCase):
+    def test_camera_platform_is_registered(self):
+        const_source = CONST_PATH.read_text()
+        hacs = json.loads(HACS_PATH.read_text())
+
+        self.assertIn("CONF_LIVE_STREAM_URL_TEMPLATE", const_source)
+        self.assertIn("Platform.CAMERA", const_source)
+        self.assertIn("camera", hacs["domains"])
+
+    def test_live_camera_uses_external_stream_template_without_token_attribute(self):
+        camera_source = CAMERA_PATH.read_text()
+
+        self.assertIn("class XHomeLiveCamera", camera_source)
+        self.assertIn("async def stream_source", camera_source)
+        self.assertIn("render_live_stream_url", camera_source)
+        self.assertIn('"native_transport": "IVIEWSAVAPIs"', camera_source)
+        self.assertNotIn('"token"', camera_source)
+
+    def test_prepare_live_stream_fetches_native_token_metadata(self):
+        coordinator_source = COORDINATOR_PATH.read_text()
+
+        self.assertIn("class XHomeLiveStreamSession", coordinator_source)
+        self.assertIn("self.client.get_device_token(uid=uid)", coordinator_source)
+        self.assertIn("start_command: int = 20", coordinator_source)
+        self.assertIn("media_header_bytes: int = 40", coordinator_source)
+        self.assertIn("normalize_region(_entry_region(self.config_entry)).native_iot_host", coordinator_source)
+
+    def test_live_stream_ui_strings_are_present(self):
+        strings = STRINGS_PATH.read_text()
+        translations = TRANSLATIONS_PATH.read_text()
+
+        for source in (strings, translations):
+            self.assertIn("live_stream_url_template", source)
+            self.assertIn("live_camera", source)
+
+
+if __name__ == "__main__":
+    unittest.main()

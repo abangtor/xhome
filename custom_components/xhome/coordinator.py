@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .api.client import JSON
+from .api.constants import normalize_region
 from .api.exceptions import XHomePushError
 from .api.push import XHomePushClient, XHomePushMessage, build_push_register_info
 from .const import (
@@ -159,6 +160,23 @@ class XHomeLatestEvent:
     event_key: str
     sort_key: tuple[int, str]
     payload: dict[str, Any]
+
+
+@dataclass(slots=True)
+class XHomeLiveStreamSession:
+    """Metadata needed by an external XHome live-stream sidecar."""
+
+    uid: str
+    device_id: int | None
+    model: str | None
+    native_iot_host: str
+    token: str
+    token_payload: JSON
+    start_command: int = 20
+    stop_command: int = 21
+    audio_codec: str = "g711"
+    video_codec: str = "h264"
+    media_header_bytes: int = 40
 
 
 class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
@@ -380,6 +398,17 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         if refresh:
             await self.async_request_refresh()
         return result
+
+    async def async_prepare_live_stream(self, uid: str) -> XHomeLiveStreamSession:
+        """Return live-token and native transport metadata for one device."""
+
+        try:
+            return await self.hass.async_add_executor_job(self._prepare_live_stream, uid)
+        except XHomeAuthError as err:
+            self.client.token = None
+            raise HomeAssistantError("XHome authentication failed while preparing live stream") from err
+        except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
+            raise HomeAssistantError(f"XHome live stream preparation failed: {err}") from err
 
     async def async_poll_events(self, *, seed_only: bool = False) -> None:
         """Poll the XHome event endpoint and fire Home Assistant events."""
@@ -697,6 +726,29 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         return XHomeCoordinatorData(devices=runtime_devices)
 
+    def _prepare_live_stream(self, uid: str) -> XHomeLiveStreamSession:
+        """Synchronous live-stream preparation helper."""
+
+        data = self._device_for_setting(uid)
+        self._ensure_login()
+        token_payload = self.client.get_device_token(uid=uid)
+        token = _live_token_from_payload(token_payload)
+        if not token:
+            if data.device_id is None:
+                raise ValueError("XHome live token response did not include a token")
+            token_payload = self.client.get_device_token(device_id=data.device_id)
+            token = _live_token_from_payload(token_payload)
+        if not token:
+            raise ValueError("XHome live token response did not include a token")
+        return XHomeLiveStreamSession(
+            uid=uid,
+            device_id=data.device_id,
+            model=data.model,
+            native_iot_host=normalize_region(_entry_region(self.config_entry)).native_iot_host,
+            token=token,
+            token_payload=token_payload,
+        )
+
     def _poll_device_events(self) -> list[dict[str, Any]]:
         """Fetch recent event records for all known devices."""
 
@@ -1013,6 +1065,17 @@ def _is_no_user_error(err: XHomeAPIError) -> bool:
 
     payload = err.payload
     return err.status_code == 400 and isinstance(payload, dict) and payload.get("message") == "no user"
+
+
+def _live_token_from_payload(payload: JSON | None) -> str | None:
+    """Extract a live P2P token from known XHome live-token response shapes."""
+
+    if not isinstance(payload, dict):
+        return None
+    if token := string_value(payload.get("token")):
+        return token
+    data = unwrap_dict(payload)
+    return string_value(data.get("token"))
 
 
 def _event_sort_key(event: dict[str, Any]) -> tuple[int, str]:

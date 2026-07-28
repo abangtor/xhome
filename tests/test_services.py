@@ -22,6 +22,7 @@ class HomeAssistantServiceTests(unittest.TestCase):
             "upsert_lock_member",
             "update_event_member",
             "list_temporary_passwords",
+            "prepare_live_stream",
             "add_temporary_password",
             "add_temporary_password_raw",
             "rename_temporary_password",
@@ -57,6 +58,7 @@ class HomeAssistantServiceTests(unittest.TestCase):
 
         self.assertIn("_require_confirmed(call)", init_source)
         self.assertIn("add_temporary_password_raw:", services_yaml)
+        self.assertIn("prepare_live_stream:", services_yaml)
         self.assertIn("delete_temporary_password:", services_yaml)
         self.assertGreaterEqual(services_yaml.count("confirm:"), 2)
 

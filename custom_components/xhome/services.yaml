@@ -151,6 +151,22 @@ list_temporary_passwords:
       selector:
         text:
 
+prepare_live_stream:
+  name: Prepare live stream
+  description: Return live-token and native P2P metadata for an external XHome streaming bridge.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    confirm:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
 add_temporary_password_raw:
   name: Add raw temporary password
   description: Submit a temporary-password/auth record with pre-encoded native data.

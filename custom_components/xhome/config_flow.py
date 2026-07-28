@@ -17,12 +17,14 @@ from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .const import (
     CONF_EVENT_SCAN_INTERVAL,
     CONF_IMAGE_ROTATION,
+    CONF_LIVE_STREAM_URL_TEMPLATE,
     CONF_LOCAL_PUSH_ENABLED,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_EVENT_SCAN_INTERVAL,
     DEFAULT_IMAGE_ROTATION,
+    DEFAULT_LIVE_STREAM_URL_TEMPLATE,
     DEFAULT_LOCAL_PUSH_ENABLED,
     DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
@@ -75,6 +77,10 @@ class XHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL
                         ),
                         CONF_IMAGE_ROTATION: user_input.get(CONF_IMAGE_ROTATION, DEFAULT_IMAGE_ROTATION),
+                        CONF_LIVE_STREAM_URL_TEMPLATE: user_input.get(
+                            CONF_LIVE_STREAM_URL_TEMPLATE,
+                            DEFAULT_LIVE_STREAM_URL_TEMPLATE,
+                        ),
                         CONF_LOCAL_PUSH_ENABLED: user_input.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
                         CONF_TIMEOUT: user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
                     },
@@ -135,6 +141,13 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                         CONF_LOCAL_PUSH_ENABLED,
                         default=self._config_entry.options.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
                     ): bool,
+                    vol.Optional(
+                        CONF_LIVE_STREAM_URL_TEMPLATE,
+                        default=self._config_entry.options.get(
+                            CONF_LIVE_STREAM_URL_TEMPLATE,
+                            DEFAULT_LIVE_STREAM_URL_TEMPLATE,
+                        ),
+                    ): cv.string,
                     vol.Required(
                         CONF_TIMEOUT,
                         default=self._config_entry.options.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
@@ -178,6 +191,10 @@ def _user_schema(user_input: dict[str, Any] | None) -> vol.Schema:
                 CONF_LOCAL_PUSH_ENABLED,
                 default=user_input.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
             ): bool,
+            vol.Optional(
+                CONF_LIVE_STREAM_URL_TEMPLATE,
+                default=user_input.get(CONF_LIVE_STREAM_URL_TEMPLATE, DEFAULT_LIVE_STREAM_URL_TEMPLATE),
+            ): cv.string,
             vol.Required(CONF_TIMEOUT, default=user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)): vol.All(
                 vol.Coerce(int), vol.Range(min=5, max=120)
             ),

@@ -8,6 +8,7 @@ DOMAIN = "xhome"
 
 CONF_EVENT_SCAN_INTERVAL = "event_scan_interval"
 CONF_IMAGE_ROTATION = "image_rotation"
+CONF_LIVE_STREAM_URL_TEMPLATE = "live_stream_url_template"
 CONF_LOCAL_PUSH_ENABLED = "local_push_enabled"
 CONF_REGION = "region"
 CONF_SCAN_INTERVAL = "scan_interval"
@@ -15,6 +16,7 @@ CONF_TIMEOUT = "timeout"
 
 DEFAULT_EVENT_SCAN_INTERVAL = 60
 DEFAULT_IMAGE_ROTATION = 0
+DEFAULT_LIVE_STREAM_URL_TEMPLATE = ""
 DEFAULT_LOCAL_PUSH_ENABLED = True
 DEFAULT_REGION = "usa"
 DEFAULT_SCAN_INTERVAL = 60
@@ -30,6 +32,7 @@ IMAGE_ROTATIONS = [0, 90, 180, 270]
 PLATFORMS = [
     Platform.LOCK,
     Platform.BUTTON,
+    Platform.CAMERA,
     Platform.SWITCH,
     Platform.SELECT,
     Platform.NUMBER,
