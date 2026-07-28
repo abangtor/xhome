@@ -132,6 +132,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to add to the native-looking relay-touch nonce timestamp",
     )
     probe.add_argument(
+        "--relay-only",
+        action="store_true",
+        help="Do not send direct local/public punch packets during P2P rendezvous",
+    )
+    probe.add_argument(
+        "--local-ip",
+        action="append",
+        dest="local_ips",
+        help="Override one advertised LocalIp entry in packet type 6; may be supplied more than once",
+    )
+    probe.add_argument("--h264-out", type=Path, help="During --p2p-rendezvous, write raw H.264 payloads here")
+    probe.add_argument("--g711-out", type=Path, help="During --p2p-rendezvous, write raw G.711 audio payloads here")
+    probe.add_argument("--jpeg-dir", type=Path, help="During --p2p-rendezvous, write JPEG frames into this directory")
+    probe.add_argument(
         "--insecure-skip-verify",
         action="store_true",
         help="Disable TLS certificate verification; native hosts may present mismatched certificates",
@@ -273,10 +287,15 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
             p2p_rendezvous = XHomeP2PRendezvousProbe(
                 uid=args.uid,
                 relays=p2p_relays,
+                local_ips=args.local_ips,
+                direct_punch_enabled=not args.relay_only,
             ).run(
                 duration=args.duration,
                 kcp_start_command=metadata.start_command if args.kcp_start else None,
                 relay_touch_time_offset=args.relay_touch_time_offset,
+                h264_out=args.h264_out,
+                g711_out=args.g711_out,
+                jpeg_dir=args.jpeg_dir,
             )
             frames.extend(transport.read_available(duration=min(1.0, args.timeout)))
         if started:

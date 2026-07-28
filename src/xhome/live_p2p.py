@@ -9,7 +9,8 @@ import struct
 import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, BinaryIO, Callable
 
 from .live import LiveAppMediaAssembler, MediaType, parse_live_app_media_packet
 from .live_transport import decode_native_frame_header, encode_native_frame
@@ -320,12 +321,16 @@ class XHomeP2PRendezvousProbe:
         uid: str,
         relays: list[tuple[str, int]],
         timeout: float = 0.2,
+        local_ips: list[str] | None = None,
+        direct_punch_enabled: bool = True,
     ) -> None:
         if not relays:
             raise ValueError("At least one relay is required")
         self.uid = uid
         self.relays = relays
         self.timeout = timeout
+        self.local_ips = local_ips
+        self.direct_punch_enabled = direct_punch_enabled
 
     def run(
         self,
@@ -337,6 +342,9 @@ class XHomeP2PRendezvousProbe:
         relay_touch_burst_size: int = 4,
         relay_touch_interval: float = 2.0,
         relay_touch_time_offset: float = 0.0,
+        h264_out: Path | None = None,
+        g711_out: Path | None = None,
+        jpeg_dir: Path | None = None,
         on_ready: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -344,7 +352,7 @@ class XHomeP2PRendezvousProbe:
             sock.bind(("0.0.0.0", 0))
             sock.settimeout(self.timeout)
             local_ip = best_effort_local_ip()
-            local_ips = best_effort_local_ips()
+            local_ips = self.local_ips or best_effort_local_ips()
             local_port = sock.getsockname()[1]
             port_token = str(local_port)
             connect_payload = build_client_connect_payload_for_ips(uid=self.uid, local_ips=local_ips, local_port=local_port)
@@ -367,7 +375,7 @@ class XHomeP2PRendezvousProbe:
                 "kcp_start": 0,
             }
             kcp_probe = KcpStartProbe(uid=self.uid, sock=sock, start_command=kcp_start_command)
-            media_probe = KcpMediaProbe(uid=self.uid, sock=sock)
+            media_probe = KcpMediaProbe(uid=self.uid, sock=sock, h264_out=h264_out, g711_out=g711_out, jpeg_dir=jpeg_dir)
             next_kcp_start = 0.0
             next_discovery = 0.0
             next_relay_touch = 0.0
@@ -377,99 +385,106 @@ class XHomeP2PRendezvousProbe:
                 sock.sendto(encode_udp_packet(P2PPacketType.RELAY_TOUCH), relay)
                 sent_counts["relay_touch"] += 1
 
-            deadline = time.monotonic() + duration
-            while time.monotonic() < deadline:
-                now = time.monotonic()
-                if selected_peer is None and now >= next_discovery:
-                    for relay in self.relays:
-                        sock.sendto(encode_udp_packet(P2PPacketType.CLIENT_CONNECT, connect_payload), relay)
-                        sent_counts["client_connect"] += 1
+            try:
+                deadline = time.monotonic() + duration
+                while time.monotonic() < deadline:
+                    now = time.monotonic()
+                    if selected_peer is None and now >= next_discovery:
+                        for relay in self.relays:
+                            sock.sendto(encode_udp_packet(P2PPacketType.CLIENT_CONNECT, connect_payload), relay)
+                            sent_counts["client_connect"] += 1
 
-                    for candidate in list(candidates.values()):
-                        if candidate.kind != P2PAddressKind.RELAY:
-                            punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
-                            sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
-                            sent_counts["direct_punch"] += 1
-                    next_discovery = now + interval
+                        for candidate in list(candidates.values()):
+                            if self.direct_punch_enabled and candidate.kind != P2PAddressKind.RELAY:
+                                punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
+                                sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
+                                sent_counts["direct_punch"] += 1
+                        next_discovery = now + interval
 
-                relay_candidates = [candidate for candidate in candidates.values() if candidate.kind == P2PAddressKind.RELAY]
-                if relay_candidates and now >= next_relay_touch:
-                    for candidate in relay_candidates:
-                        sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
-                        sent_counts["relay_info"] += 1
-                        for _ in range(relay_touch_burst_size):
-                            sock.sendto(
-                                encode_udp_packet(
-                                    P2PPacketType.DIRECT_KCP_DATA,
-                                    build_relay_touch_payload(
-                                        uid=self.uid,
-                                        now=time.time() + relay_touch_time_offset,
+                    relay_candidates = [
+                        candidate for candidate in candidates.values() if candidate.kind == P2PAddressKind.RELAY
+                    ]
+                    if relay_candidates and now >= next_relay_touch:
+                        for candidate in relay_candidates:
+                            sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
+                            sent_counts["relay_info"] += 1
+                            for _ in range(relay_touch_burst_size):
+                                sock.sendto(
+                                    encode_udp_packet(
+                                        P2PPacketType.DIRECT_KCP_DATA,
+                                        build_relay_touch_payload(
+                                            uid=self.uid,
+                                            now=time.time() + relay_touch_time_offset,
+                                        ),
+                                        channel=RAW_CHANNEL,
                                     ),
-                                    channel=RAW_CHANNEL,
-                                ),
-                                candidate.address,
-                            )
-                            sent_counts["relay_touch_channel4"] += 1
-                    next_relay_touch = now + relay_touch_interval
+                                    candidate.address,
+                                )
+                                sent_counts["relay_touch_channel4"] += 1
+                        next_relay_touch = now + relay_touch_interval
 
-                if kcp_start_command is not None and now >= next_kcp_start:
-                    sent_counts["kcp_start"] += kcp_probe.send_start_packets(candidates.values())
-                    next_kcp_start = now + kcp_start_interval
+                    if kcp_start_command is not None and now >= next_kcp_start:
+                        sent_counts["kcp_start"] += kcp_probe.send_start_packets(candidates.values())
+                        next_kcp_start = now + kcp_start_interval
 
-                if now >= next_heartbeat:
-                    heartbeat_targets = set(self.relays)
-                    heartbeat_targets.update(candidate.address for candidate in relay_candidates)
-                    if selected_peer is not None:
-                        heartbeat_targets.add(selected_peer)
-                    for target in heartbeat_targets:
-                        sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), target)
-                        sent_counts["heartbeat"] += 1
-                    next_heartbeat = now + 3.0
+                    if now >= next_heartbeat:
+                        heartbeat_targets = set(self.relays)
+                        heartbeat_targets.update(candidate.address for candidate in relay_candidates)
+                        if selected_peer is not None:
+                            heartbeat_targets.add(selected_peer)
+                        for target in heartbeat_targets:
+                            sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), target)
+                            sent_counts["heartbeat"] += 1
+                        next_heartbeat = now + 3.0
 
-                for received, addr in read_udp_available_with_addresses(sock, timeout=self.timeout):
-                    packets.append(received)
-                    media_probe.receive_packet(received, addr)
-                    kcp_probe.receive_packet(received, addr)
-                    if received.packet_type == P2PPacketType.CLIENT_CONNECT_RESPONSE and received.payload:
-                        response = ClientConnectResponse.from_payload(received.payload)
-                        response_key = json.dumps(response.raw, sort_keys=True)
-                        if response_key not in response_keys:
-                            response_keys.add(response_key)
-                            responses.append(response)
-                        for candidate in response.candidates:
-                            candidates[(candidate.host, candidate.port, candidate.kind)] = candidate
-                    elif received.packet_type == P2PPacketType.DIRECT_PUNCH and received.payload:
-                        response_payload = build_peer_punch_response_payload(uid=self.uid, port_token=port_token)
-                        sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH_RESPONSE, response_payload), addr)
-                        sent_counts["punch_response"] += 1
-                    elif received.packet_type in {
-                        P2PPacketType.DIRECT_PUNCH_RESPONSE,
-                        P2PPacketType.HEARTBEAT,
-                        P2PPacketType.RELAY_CONNECTED,
-                        P2PPacketType.KCP_DATA,
-                        P2PPacketType.DIRECT_KCP_DATA,
-                        P2PPacketType.RELAY_KCP_DATA,
-                    }:
-                        selected_peer = addr
-                        if on_ready is not None and not ready_notified:
-                            on_ready()
-                            ready_notified = True
-                time.sleep(interval)
+                    for received, addr in read_udp_available_with_addresses(sock, timeout=self.timeout):
+                        packets.append(received)
+                        media_probe.receive_packet(received, addr)
+                        kcp_probe.receive_packet(received, addr)
+                        if received.packet_type == P2PPacketType.CLIENT_CONNECT_RESPONSE and received.payload:
+                            response = ClientConnectResponse.from_payload(received.payload)
+                            response_key = json.dumps(response.raw, sort_keys=True)
+                            if response_key not in response_keys:
+                                response_keys.add(response_key)
+                                responses.append(response)
+                            for candidate in response.candidates:
+                                candidates[(candidate.host, candidate.port, candidate.kind)] = candidate
+                        elif received.packet_type == P2PPacketType.DIRECT_PUNCH and received.payload:
+                            response_payload = build_peer_punch_response_payload(uid=self.uid, port_token=port_token)
+                            sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH_RESPONSE, response_payload), addr)
+                            sent_counts["punch_response"] += 1
+                        elif received.packet_type in {
+                            P2PPacketType.DIRECT_PUNCH_RESPONSE,
+                            P2PPacketType.HEARTBEAT,
+                            P2PPacketType.RELAY_CONNECTED,
+                            P2PPacketType.KCP_DATA,
+                            P2PPacketType.DIRECT_KCP_DATA,
+                            P2PPacketType.RELAY_KCP_DATA,
+                        }:
+                            selected_peer = addr
+                            if on_ready is not None and not ready_notified:
+                                on_ready()
+                                ready_notified = True
+                    time.sleep(interval)
 
-            return {
-                "local_ip": local_ip,
-                "local_port": local_port,
-                "relays": [{"host": host, "port": port} for host, port in self.relays],
-                "sent": sent_counts,
-                "selected_peer": {"host": selected_peer[0], "port": selected_peer[1]} if selected_peer else None,
-                "candidates": [candidate.as_dict() for candidate in candidates.values()],
-                "client_connect_responses": [response.as_dict() for response in responses],
-                "media_probe": media_probe.as_dict(),
-                "kcp_start_probe": kcp_probe.as_dict(),
-                "packet_type_counts": packet_type_counts(packets),
-                "packets": [packet_summary(packet) for packet in packets[:10]],
-                "packets_truncated": max(0, len(packets) - 10),
-            }
+                return {
+                    "local_ip": local_ip,
+                    "local_ips": local_ips,
+                    "local_port": local_port,
+                    "direct_punch_enabled": self.direct_punch_enabled,
+                    "relays": [{"host": host, "port": port} for host, port in self.relays],
+                    "sent": sent_counts,
+                    "selected_peer": {"host": selected_peer[0], "port": selected_peer[1]} if selected_peer else None,
+                    "candidates": [candidate.as_dict() for candidate in candidates.values()],
+                    "client_connect_responses": [response.as_dict() for response in responses],
+                    "media_probe": media_probe.as_dict(),
+                    "kcp_start_probe": kcp_probe.as_dict(),
+                    "packet_type_counts": packet_type_counts(packets),
+                    "packets": [packet_summary(packet) for packet in packets[:10]],
+                    "packets_truncated": max(0, len(packets) - 10),
+                }
+            finally:
+                media_probe.close()
         finally:
             sock.close()
 
@@ -584,9 +599,22 @@ class KcpMediaProbe:
     completed app-media payloads to assemble.
     """
 
-    def __init__(self, *, uid: str, sock: socket.socket) -> None:
+    def __init__(
+        self,
+        *,
+        uid: str,
+        sock: socket.socket,
+        h264_out: Path | None = None,
+        g711_out: Path | None = None,
+        jpeg_dir: Path | None = None,
+    ) -> None:
         self.uid = uid
         self.sock = sock
+        self.jpeg_dir = jpeg_dir
+        self.h264_stream = open_output(h264_out)
+        self.g711_stream = open_output(g711_out)
+        if self.jpeg_dir:
+            self.jpeg_dir.mkdir(parents=True, exist_ok=True)
         self.error: str | None = None
         self.paths: dict[tuple[str, int, int, str], Any] = {}
         self.assembler = LiveAppMediaAssembler()
@@ -597,6 +625,14 @@ class KcpMediaProbe:
         self.g711_frames = 0
         self.jpeg_frames = 0
         self.first_payloads: list[dict[str, Any]] = []
+
+    def close(self) -> None:
+        if self.h264_stream is not None:
+            self.h264_stream.close()
+            self.h264_stream = None
+        if self.g711_stream is not None:
+            self.g711_stream.close()
+            self.g711_stream = None
 
     def receive_packet(self, packet: UdpPacket, addr: tuple[str, int]) -> None:
         if self.error is not None:
@@ -673,10 +709,18 @@ class KcpMediaProbe:
         self.frames += 1
         if frame.media_type in {MediaType.H264_I_FRAME, MediaType.H264_P_FRAME, MediaType.H264_B_FRAME}:
             self.h264_frames += 1
+            if self.h264_stream is not None:
+                self.h264_stream.write(frame.payload)
+                self.h264_stream.flush()
         elif frame.media_type == MediaType.G711_AUDIO:
             self.g711_frames += 1
+            if self.g711_stream is not None:
+                self.g711_stream.write(frame.payload)
+                self.g711_stream.flush()
         elif frame.media_type == MediaType.JPEG_FRAME:
             self.jpeg_frames += 1
+            if self.jpeg_dir is not None:
+                (self.jpeg_dir / f"frame-{self.jpeg_frames:06d}.jpg").write_bytes(frame.payload)
 
 
 def native_payload_summary(payload: bytes) -> dict[str, Any]:
@@ -693,6 +737,13 @@ def native_payload_summary(payload: bytes) -> dict[str, Any]:
     else:
         summary["payload_text"] = payload.decode("utf-8", errors="replace")
     return summary
+
+
+def open_output(path: Path | None) -> BinaryIO | None:
+    if path is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path.open("wb")
 
 
 def read_udp_available(sock: socket.socket, *, timeout: float) -> list[UdpPacket]:

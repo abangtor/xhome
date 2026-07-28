@@ -11,10 +11,12 @@ This sidecar layer reimplements the transport in portable Python.
 5. strip the 40-byte XHome media header
 6. forward raw H.264/G.711/JPEG payloads to files, ffmpeg, or go2rtc
 
-The implemented Python path currently covers steps 1-4, passive KCP media
-receive/ACK handling, and offline media extraction from successful app PCAPs.
-The remaining live gap is making the device publish media packets to this
-Python client from the Home Assistant network path.
+The implemented Python path currently covers steps 1-5, passive KCP media
+receive/ACK handling, live media dumps, and offline media extraction from
+successful app PCAPs. A relay-only live probe has successfully received JPEG
+frames from the USA relay path. The remaining product gap is turning those
+payloads into a continuously served Home Assistant stream URL instead of debug
+files.
 
 ## Portable Cloud Probe
 
@@ -50,6 +52,11 @@ type-15 relay-info packets, answers type-11 peer handshakes with type-12
 responses, sends the app's repeated four-packet type-18/channel-4 relay touch
 bursts, and reports any type-13/18/19 KCP data packets it sees.
 
+Add `--relay-only` when the client and device are behind a path where the
+direct local/public punches derail media. In the known successful Home
+Assistant-side test, relay-only mode was required even though the relay reported
+`Online:"0"`.
+
 Add `--kcp-start` to the rendezvous probe to actively send command `20` through
 the recovered KCP path. The native TLS session is kept open while UDP rendezvous
 runs; command `21` is sent only after the UDP/KCP probe exits.
@@ -61,9 +68,20 @@ python -m xhome.live_sidecar cloud-probe \
   --native-iot-host usaiotd.lancens.com \
   --send-start \
   --p2p-rendezvous \
-  --kcp-start \
+  --relay-only \
+  --jpeg-dir /tmp/xhome-live-jpegs \
+  --h264-out /tmp/xhome-live.h264 \
+  --g711-out /tmp/xhome-live.g711 \
   --insecure-skip-verify
 ```
+
+The live output options are debug dumps from the current receive path:
+
+- `--jpeg-dir`: writes assembled JPEG frames as `frame-000001.jpg`, etc.
+- `--h264-out`: appends raw H.264 payloads when the device sends media types
+  `160/161/162`.
+- `--g711-out`: appends raw G.711 audio payloads when the device sends media
+  type `164`.
 
 Native KCP packets use UDP packet type `13`, `18`, or `19`. The UDP envelope
 channel is the native logical channel: `1` for control and `2` for media.
