@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HACS_ICON = ROOT / "icon.png"
 BRAND_ICON = ROOT / "custom_components" / "xhome" / "brand" / "icon.png"
 COMPONENT_ICON = ROOT / "custom_components" / "xhome" / "icon.png"
 
@@ -19,6 +20,9 @@ class AssetTests(unittest.TestCase):
 
     def test_component_icon_matches_brand_icon(self):
         self.assertEqual(COMPONENT_ICON.read_bytes(), BRAND_ICON.read_bytes())
+
+    def test_hacs_repository_icon_matches_brand_icon(self):
+        self.assertEqual(HACS_ICON.read_bytes(), BRAND_ICON.read_bytes())
 
 
 def _png_dimensions(data: bytes) -> tuple[int, int]:
