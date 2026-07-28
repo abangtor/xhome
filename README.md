@@ -242,6 +242,12 @@ command `20`, stop command `21`, codec names, and the 40-byte media header size
 needed by a sidecar. Treat that response like a secret; the live token is
 credential material.
 
+The repo now includes the first receive-only sidecar surface in
+`xhome.live_sidecar`. It defines a small stdio contract for an Android/ARM64
+native helper that loads `libIVIEWSAVAPIs.so`, emits callback records, and lets
+the Python relay strip the 40-byte XHome media header into raw H.264/G.711/JPEG
+payloads. See `docs/XHOME_LIVE_SIDECAR.md`.
+
 ## Development Roadmap
 
 1. Harden the config flow and coordinator with Home Assistant test coverage.

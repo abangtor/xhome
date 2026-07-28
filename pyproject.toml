@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 xhome = "xhome.cli:main"
+xhome-live-sidecar = "xhome.live_sidecar:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
