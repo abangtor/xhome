@@ -243,10 +243,11 @@ needed by a sidecar. Treat that response like a secret; the live token is
 credential material.
 
 The repo now includes the first receive-only sidecar surface in
-`xhome.live_sidecar`. It defines a small stdio contract for an Android/ARM64
-native helper that loads `libIVIEWSAVAPIs.so`, emits callback records, and lets
-the Python relay strip the 40-byte XHome media header into raw H.264/G.711/JPEG
-payloads. See `docs/XHOME_LIVE_SIDECAR.md`.
+`xhome.live_sidecar`, plus a portable Python reimplementation of the native IoT
+TLS login phase and the first UDP relay probe. The implemented Python path can
+log in to `usaiotd.lancens.com:11201`, send command `20`, receive command `9`
+with P2P relay addresses, and talk to the returned UDP relay. KCP/media relay is
+still the remaining streaming layer. See `docs/XHOME_LIVE_SIDECAR.md`.
 
 ## Development Roadmap
 

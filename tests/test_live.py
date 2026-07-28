@@ -16,6 +16,13 @@ from xhome.live import (
     parse_media_frame,
 )
 from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks
+from xhome.live_p2p import build_client_connect_payload, decode_udp_packet, encode_udp_packet
+from xhome.live_transport import (
+    LIVE_LOGIN_COMMAND,
+    decode_native_frame_header,
+    encode_native_frame,
+    extract_p2p_servers,
+)
 
 
 class LiveFrameTests(unittest.TestCase):
@@ -119,6 +126,45 @@ class LiveSidecarTests(unittest.TestCase):
             self.assertEqual(stats.g711_frames, 1)
             self.assertEqual(h264.read_bytes(), b"video")
             self.assertEqual(g711.read_bytes(), b"audio")
+
+
+class LiveTransportTests(unittest.TestCase):
+    def test_native_tls_frame_codec(self):
+        payload = b'{"UID":"abc","token":"def"}'
+        frame = encode_native_frame(LIVE_LOGIN_COMMAND, payload)
+
+        command, payload_len = decode_native_frame_header(frame[:8])
+
+        self.assertEqual(command, 10001)
+        self.assertEqual(payload_len, len(payload))
+        self.assertEqual(frame[8:], payload)
+
+    def test_extract_p2p_servers_from_command_9(self):
+        from xhome.live_transport import NativeFrame
+
+        frames = [
+            NativeFrame(command=1, payload=b""),
+            NativeFrame(command=9, payload=b'[{"IP":"121.42.144.92","Port":"9729"}]'),
+        ]
+
+        self.assertEqual(extract_p2p_servers(frames), [{"IP": "121.42.144.92", "Port": "9729"}])
+
+    def test_p2p_udp_packet_codec(self):
+        data = encode_udp_packet(6, b"{}", channel=2)
+        packet = decode_udp_packet(data)
+
+        self.assertEqual(packet.packet_type, 6)
+        self.assertEqual(packet.channel, 2)
+        self.assertEqual(packet.payload, b"{}")
+
+    def test_client_connect_payload_shape(self):
+        payload = build_client_connect_payload(uid="LSV", local_ip="192.168.1.10", local_port=54321)
+        decoded = __import__("json").loads(payload)
+
+        self.assertEqual(decoded["Uid"], "LSV")
+        self.assertEqual(decoded["Port"], "54321")
+        self.assertEqual(decoded["Key"], "54321")
+        self.assertEqual(decoded["LocalIp"], [{"IP": "192.168.1.10"}])
 
 
 if __name__ == "__main__":

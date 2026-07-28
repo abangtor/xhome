@@ -24,6 +24,8 @@ from .live import (
     callback_to_media_frame,
     live_session_from_token_payload,
 )
+from .live_transport import XHomeLiveCloudTransport, extract_p2p_servers
+from .live_p2p import XHomeP2PProbe
 
 RECORD_MAGIC = b"XHF1"
 RECORD_HEADER = struct.Struct("<4siiiI")
@@ -96,6 +98,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     explain = subparsers.add_parser("helper-contract", help="Print the native-helper stdio protocol")
     explain.set_defaults(func=cmd_helper_contract)
+
+    probe = subparsers.add_parser("cloud-probe", help="Probe the portable native-IoT TLS login phase")
+    probe.add_argument("--uid", required=True)
+    probe.add_argument("--token", required=True)
+    probe.add_argument("--native-iot-host", required=True)
+    probe.add_argument("--duration", type=float, default=5.0)
+    probe.add_argument("--timeout", type=float, default=10.0)
+    probe.add_argument("--send-start", action="store_true", help="Send command 20 after login, then command 21 before exit")
+    probe.add_argument("--p2p-probe", action="store_true", help="Probe the first returned UDP relay after command 9")
+    probe.add_argument(
+        "--insecure-skip-verify",
+        action="store_true",
+        help="Disable TLS certificate verification; native hosts may present mismatched certificates",
+    )
+    probe.set_defaults(func=cmd_cloud_probe)
 
     return parser
 
@@ -183,6 +200,50 @@ def cmd_helper_contract(args: argparse.Namespace) -> dict[str, Any]:
             "g711_type": 164,
             "jpeg_type": 165,
         },
+    }
+
+
+def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
+    metadata = LiveSessionMetadata(
+        uid=args.uid,
+        token=args.token,
+        native_iot_host=args.native_iot_host,
+    )
+    with XHomeLiveCloudTransport(
+        metadata,
+        timeout=args.timeout,
+        verify_tls=not args.insecure_skip_verify,
+    ) as transport:
+        transport.login()
+        frames = []
+        if args.send_start:
+            frames.extend(transport.read_available(duration=min(2.0, args.duration)))
+            transport.send_frame(metadata.start_command)
+        frames.extend(transport.read_available(duration=args.duration))
+        if args.send_start:
+            transport.send_frame(metadata.stop_command)
+
+    p2p_probe = None
+    p2p_servers = extract_p2p_servers(frames)
+    if args.p2p_probe and p2p_servers:
+        first = p2p_servers[0]
+        p2p_probe = XHomeP2PProbe(
+            uid=args.uid,
+            relay_host=str(first["IP"]),
+            relay_port=int(first["Port"]),
+        ).run()
+
+    return {
+        "frames": [
+            {
+                "command": frame.command,
+                "payload_length": len(frame.payload),
+                "payload_text": frame.text if len(frame.payload) <= 4096 else frame.text[:4096],
+            }
+            for frame in frames
+        ],
+        "p2p_servers": p2p_servers,
+        "p2p_probe": p2p_probe,
     }
 
 

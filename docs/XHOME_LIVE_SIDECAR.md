@@ -1,20 +1,50 @@
 # XHome Live Sidecar
 
-XHome live video is native P2P through `libIVIEWSAVAPIs.so`; it is not a REST,
-HLS, or RTSP URL. The Home Assistant integration prepares a live token through
-`xhome.prepare_live_stream`. This sidecar layer owns the next boundary:
+XHome live video is native P2P; it is not a REST, HLS, or RTSP URL. The Home
+Assistant integration prepares a live token through `xhome.prepare_live_stream`.
+This sidecar layer reimplements the transport in portable Python.
 
 1. receive live-token metadata from Home Assistant or the CLI
-2. hand it to a native helper that can load `libIVIEWSAVAPIs.so`
-3. send command `20` once P2P is connected
-4. receive native callbacks
+2. log in to the regional native IoT TLS endpoint on port `11201`
+3. send command `20` to request AV
+4. rendezvous with the returned UDP relay and complete the KCP session
 5. strip the 40-byte XHome media header
 6. forward raw H.264/G.711/JPEG payloads to files, ffmpeg, or go2rtc
 
-## Native Helper Contract
+The implemented Python path currently covers steps 1-3 plus the first UDP relay
+probe. KCP session setup and media extraction are the next pieces.
 
-The native helper is intentionally tiny. It should run where the Android ARM64
-library can load, for example Android/Termux or a purpose-built Android service.
+## Portable Cloud Probe
+
+The Python package includes a portable reimplementation of the native IoT TLS
+login phase. It connects to the regional native IoT host on port `11201`, sends
+command `10001` with `{"UID":"...","token":"..."}`, and reads native command
+frames.
+
+```bash
+python -m xhome.live_sidecar cloud-probe \
+  --uid LSV212PFJU5TQT42R3UX \
+  --token ... \
+  --native-iot-host usaiotd.lancens.com \
+  --insecure-skip-verify
+```
+
+The insecure flag is currently needed for the observed USA native host
+certificate mismatch; the original Android library appears to tolerate that
+mismatch.
+
+Add `--send-start` to deliberately send command `20` after login and command
+`21` before exit during controlled stream testing.
+
+Add `--p2p-probe` with `--send-start` to send the first pure-Python UDP
+client-connecting packets to the returned relay. This is still a probe, not a
+complete KCP/media implementation.
+
+## Callback Capture Format
+
+The older `relay` and `strip-callbacks` commands are kept as a capture/debugging
+format for callback records recovered from `libIVIEWSAVAPIs.so`. They are not
+the preferred runtime path.
 
 Python writes JSON lines to helper stdin:
 
@@ -36,15 +66,15 @@ All integers are little-endian. The fields map directly to:
 IVIEWSAVAPIs.AVAPISCallback.callback(int type, int cmdOrType, int lenOrStatus, byte[] payload)
 ```
 
-## Python Relay
+## Callback Tools
 
-The relay is available as a module:
+Print the callback contract:
 
 ```bash
 python -m xhome.live_sidecar helper-contract
 ```
 
-With a native helper:
+Relay a callback-emitting helper:
 
 ```bash
 python -m xhome.live_sidecar relay \
@@ -68,10 +98,3 @@ python -m xhome.live_sidecar strip-callbacks callbacks.xhf \
 
 The resulting H.264 file is intentionally raw payload bytes. The next integration
 step is to pipe those bytes into ffmpeg/go2rtc rather than writing files.
-
-## Android Helper
-
-`sidecar/android-java` contains a minimal Java helper for the native side of the
-contract. It is not packaged as an Android app yet; it is meant to prove that the
-original JNI library can be driven from a tiny process before we build service
-packaging around it.
