@@ -9,10 +9,12 @@ from xhome.live import (
     CallbackType,
     ConnectionStatus,
     ControlCommand,
+    LiveAppMediaAssembler,
     LiveCallback,
     MediaType,
     callback_to_media_frame,
     live_session_from_token_payload,
+    parse_live_app_media_packet,
     parse_media_frame,
 )
 from xhome.live_kcp import CONTROL_CONV_ID, MEDIA_CONV_ID, XHomeKcpChannels, strip_uid_suffix
@@ -22,6 +24,7 @@ from xhome.live_p2p import (
     build_client_connect_payload,
     build_peer_punch_payload,
     build_peer_punch_response_payload,
+    build_relay_touch_payload,
     build_uid_payload,
     decode_udp_packet,
     encode_kcp_udp_packet,
@@ -90,6 +93,46 @@ class LiveFrameTests(unittest.TestCase):
         self.assertEqual(metadata.token, "abc123")
         self.assertEqual(metadata.start_command, 20)
         self.assertEqual(metadata.as_bridge_payload()["media_header_bytes"], 40)
+
+    def test_parse_live_app_media_packet(self):
+        header = bytearray(20)
+        header[:4] = (8).to_bytes(4, "little")
+        header[4:8] = (15).to_bytes(4, "little")
+        header[11] = MediaType.JPEG_FRAME
+        header[13] = 12
+        header[14] = 1
+        header[15] = 1
+        header[16:20] = (3).to_bytes(4, "little")
+
+        packet = parse_live_app_media_packet(bytes(header) + b"jpg")
+
+        self.assertEqual(packet.command, 8)
+        self.assertEqual(packet.declared_length, 15)
+        self.assertEqual(packet.media_type, MediaType.JPEG_FRAME)
+        self.assertEqual(packet.sequence, 12)
+        self.assertEqual(packet.fragment_index, 1)
+        self.assertTrue(packet.starts_frame)
+        self.assertEqual(packet.payload, b"jpg")
+
+    def test_live_app_media_assembler_returns_frame_on_end_fragment(self):
+        def packet(flag: int, payload: bytes) -> object:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return parse_live_app_media_packet(bytes(header) + payload)
+
+        assembler = LiveAppMediaAssembler()
+
+        self.assertIsNone(assembler.feed(packet(1, b"\xff\xd8")))
+        self.assertIsNone(assembler.feed(packet(0, b"body")))
+        frame = assembler.feed(packet(2, b"\xff\xd9"))
+
+        self.assertIsNotNone(frame)
+        self.assertTrue(frame.is_jpeg)
+        self.assertEqual(frame.payload, b"\xff\xd8body\xff\xd9")
 
 
 class LiveSidecarTests(unittest.TestCase):
@@ -201,18 +244,23 @@ class LiveTransportTests(unittest.TestCase):
         )
 
     def test_punch_and_heartbeat_payloads_match_native_field_names(self):
-        punch = __import__("json").loads(build_peer_punch_payload(uid="LSV", port_token="54321"))
+        punch = __import__("json").loads(build_peer_punch_payload(uid="LSV", address_kind=P2PAddressKind.PUBLIC))
         punch_response = __import__("json").loads(
             build_peer_punch_response_payload(uid="LSV", port_token="54321")
         )
         relay_info = __import__("json").loads(build_uid_payload(uid="LSV", include_key=True))
 
-        self.assertEqual(punch, {"Uid": "LSV", "Key": "", "Port": "54321"})
+        self.assertEqual(punch, {"Uid": "LSV", "Key": "", "Type": "1"})
         self.assertEqual(punch_response["Uid"], "LSV")
         self.assertEqual(punch_response["Key"], "")
         self.assertEqual(punch_response["Port"], "54321")
         self.assertIsInstance(punch_response["Time"], int)
         self.assertEqual(relay_info, {"Uid": "LSV", "Key": ""})
+
+    def test_relay_touch_payload_appends_uid_to_eight_byte_nonce(self):
+        payload = build_relay_touch_payload(uid="LSV212PFJU5TQT42R3UX", nonce=b"12345678")
+
+        self.assertEqual(payload, b"12345678LSV212PFJU5TQT42R3UX")
 
     def test_kcp_udp_packet_appends_uid_for_direct_relay_mode(self):
         packet = decode_udp_packet(
@@ -227,6 +275,21 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
         self.assertEqual(packet.channel, 2)
         self.assertEqual(packet.payload, b"kcpLSV212PFJU5TQT42R3UX")
+
+    def test_kcp_channel_uses_logical_channel_in_udp_envelope(self):
+        sent = []
+        channels = XHomeKcpChannels(
+            uid="LSV212PFJU5TQT42R3UX",
+            send_udp=sent.append,
+            relay_tunnel=True,
+            kcp_factory=FakeKCP,
+        )
+
+        channels.send_media(b"start")
+        packet = decode_udp_packet(sent[0])
+
+        self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
+        self.assertEqual(packet.channel, 2)
 
     def test_unique_p2p_relays_dedupes_command_9_servers(self):
         relays = unique_p2p_relays(
@@ -290,7 +353,7 @@ class LiveKcpTests(unittest.TestCase):
 
         self.assertEqual(conv_ids, [CONTROL_CONV_ID, MEDIA_CONV_ID])
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
-        self.assertEqual(packet.channel, 4)
+        self.assertEqual(packet.channel, 2)
         self.assertEqual(packet.payload, b"kcp:payloadLSV212PFJU5TQT42R3UX")
 
     def test_kcp_channels_route_inbound_media_packets(self):

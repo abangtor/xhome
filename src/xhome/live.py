@@ -8,6 +8,7 @@ from typing import Any
 
 
 MEDIA_HEADER_BYTES = 40
+APP_MEDIA_HEADER_BYTES = 20
 
 
 class CallbackType(IntEnum):
@@ -137,6 +138,52 @@ class MediaFrame:
         return self.media_type == MediaType.JPEG_FRAME
 
 
+@dataclass(frozen=True)
+class LiveAppMediaPacket:
+    """One command-8 media fragment from the portable P2P/KCP stream."""
+
+    command: int
+    declared_length: int
+    media_type: MediaType
+    sequence: int
+    fragment_index: int
+    fragment_flag: int
+    payload: bytes
+    header: bytes
+
+    @property
+    def starts_frame(self) -> bool:
+        return self.fragment_flag == 1
+
+    @property
+    def continues_frame(self) -> bool:
+        return self.fragment_flag == 0
+
+    @property
+    def ends_frame(self) -> bool:
+        return self.fragment_flag == 2
+
+
+@dataclass(frozen=True)
+class LiveAppMediaFrame:
+    """One assembled media frame from command-8 P2P fragments."""
+
+    media_type: MediaType
+    payload: bytes
+
+    @property
+    def is_h264(self) -> bool:
+        return self.media_type in H264_MEDIA_TYPES
+
+    @property
+    def is_g711(self) -> bool:
+        return self.media_type == MediaType.G711_AUDIO
+
+    @property
+    def is_jpeg(self) -> bool:
+        return self.media_type == MediaType.JPEG_FRAME
+
+
 def live_session_from_token_payload(
     *,
     uid: str,
@@ -182,6 +229,70 @@ def parse_media_frame(data: bytes, *, header_bytes: int = MEDIA_HEADER_BYTES) ->
         payload=data[header_bytes:],
         header=data[:header_bytes],
     )
+
+
+def parse_live_app_media_packet(data: bytes) -> LiveAppMediaPacket:
+    """Parse one command-8 media fragment from the P2P/KCP stream.
+
+    Captured Android traffic uses a 20-byte application header inside KCP:
+
+    - bytes 0..3: little-endian command, usually ``8``
+    - bytes 4..7: payload length after these first 8 bytes
+    - byte 11: media type, e.g. ``165`` for JPEG
+    - byte 13: rolling sequence id
+    - byte 14: fragment index within the current frame
+    - byte 15: fragment flag, ``1`` start, ``0`` middle, ``2`` end
+    - bytes 16..19: fragment payload length
+    """
+
+    if len(data) < APP_MEDIA_HEADER_BYTES:
+        raise ValueError(f"Live app media packet is too short: {len(data)} < {APP_MEDIA_HEADER_BYTES}")
+    command = int.from_bytes(data[:4], "little", signed=False)
+    declared_length = int.from_bytes(data[4:8], "little", signed=False)
+    try:
+        media_type = MediaType(data[11])
+    except ValueError as exc:
+        raise ValueError(f"Unknown XHome app media type: {data[11]}") from exc
+    payload_length = int.from_bytes(data[16:20], "little", signed=False)
+    return LiveAppMediaPacket(
+        command=command,
+        declared_length=declared_length,
+        media_type=media_type,
+        sequence=data[13],
+        fragment_index=data[14],
+        fragment_flag=data[15],
+        payload=data[APP_MEDIA_HEADER_BYTES : APP_MEDIA_HEADER_BYTES + payload_length],
+        header=data[:APP_MEDIA_HEADER_BYTES],
+    )
+
+
+class LiveAppMediaAssembler:
+    """Assemble command-8 P2P media fragments into full frames."""
+
+    def __init__(self) -> None:
+        self._media_type: MediaType | None = None
+        self._chunks = bytearray()
+
+    def feed(self, packet: LiveAppMediaPacket) -> LiveAppMediaFrame | None:
+        """Feed one parsed packet and return a frame when an end fragment arrives."""
+
+        if packet.starts_frame:
+            self._media_type = packet.media_type
+            self._chunks = bytearray(packet.payload)
+            return None
+        if self._media_type is None:
+            return None
+        if packet.media_type != self._media_type:
+            self._media_type = packet.media_type
+            self._chunks = bytearray(packet.payload)
+            return None
+        self._chunks.extend(packet.payload)
+        if packet.ends_frame:
+            frame = LiveAppMediaFrame(media_type=packet.media_type, payload=bytes(self._chunks))
+            self._media_type = None
+            self._chunks = bytearray()
+            return frame
+        return None
 
 
 def callback_to_media_frame(callback: LiveCallback, *, header_bytes: int = MEDIA_HEADER_BYTES) -> MediaFrame | None:

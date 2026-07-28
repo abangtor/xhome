@@ -10,7 +10,6 @@ from .live_p2p import (
     CLIENT_CONTROL_CHANNEL,
     MEDIA_CHANNEL,
     P2PPacketType,
-    RAW_CHANNEL,
     UdpPacket,
     encode_kcp_udp_packet,
 )
@@ -79,7 +78,7 @@ class XHomeKcpChannel:
             encode_kcp_udp_packet(
                 self.packet_type,
                 kcp_payload,
-                channel=RAW_CHANNEL,
+                channel=self.config.channel,
                 uid_suffix=self.uid_suffix,
             )
         )

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import secrets
 import socket
 import struct
 import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any
+from typing import Any, Callable
 
 from .live_transport import decode_native_frame_header, encode_native_frame
 
@@ -156,10 +157,22 @@ def build_json_payload(payload: dict[str, Any]) -> bytes:
 def build_client_connect_payload(*, uid: str, local_ip: str, local_port: int, key: str | None = None) -> bytes:
     """Build the client-connecting JSON payload used by packet type 6."""
 
+    return build_client_connect_payload_for_ips(uid=uid, local_ips=[local_ip], local_port=local_port, key=key)
+
+
+def build_client_connect_payload_for_ips(
+    *,
+    uid: str,
+    local_ips: list[str],
+    local_port: int,
+    key: str | None = None,
+) -> bytes:
+    """Build the client-connecting JSON payload used by packet type 6."""
+
     port = str(local_port)
     return build_json_payload(
         {
-            "LocalIp": [{"IP": local_ip}],
+            "LocalIp": [{"IP": local_ip} for local_ip in local_ips],
             "Uid": uid,
             "Port": port,
             "Key": key if key is not None else port,
@@ -167,10 +180,11 @@ def build_client_connect_payload(*, uid: str, local_ip: str, local_port: int, ke
     )
 
 
-def build_peer_punch_payload(*, uid: str, port_token: str) -> bytes:
+def build_peer_punch_payload(*, uid: str, address_kind: P2PAddressKind | int | str) -> bytes:
     """Build the client punching payload used by packet type 11."""
 
-    return build_json_payload({"Uid": uid, "Key": "", "Port": port_token})
+    kind = P2PAddressKind(address_kind)
+    return build_json_payload({"Uid": uid, "Key": "", "Type": str(int(kind))})
 
 
 def build_peer_punch_response_payload(*, uid: str, port_token: str) -> bytes:
@@ -186,6 +200,21 @@ def build_uid_payload(*, uid: str, include_key: bool = False) -> bytes:
     if include_key:
         payload["Key"] = ""
     return build_json_payload(payload)
+
+
+def build_relay_touch_payload(*, uid: str, nonce: bytes | None = None) -> bytes:
+    """Build the short channel-4 relay touch payload seen in the Android app.
+
+    The native client sends packet type 18 on UDP envelope channel 4 with eight
+    opaque bytes followed by the target UID. The relay echoes the opaque bytes
+    back on packet type 19/channel 4 and sends a type-16 relay-connected notice.
+    The bytes do not appear to be KCP; they are treated as an opaque nonce here.
+    """
+
+    nonce = nonce or secrets.token_bytes(8)
+    if len(nonce) != 8:
+        raise ValueError("Relay touch nonce must be exactly 8 bytes")
+    return nonce + uid.encode("ascii")
 
 
 def encode_kcp_udp_packet(
@@ -229,6 +258,7 @@ class XHomeP2PProbe:
             sock.bind(("0.0.0.0", 0))
             sock.settimeout(self.timeout)
             local_ip = best_effort_local_ip()
+            local_ips = [local_ip]
             local_port = sock.getsockname()[1]
             sock.sendto(encode_udp_packet(0), self.relay)
             payload = build_client_connect_payload(uid=self.uid, local_ip=local_ip, local_port=local_port)
@@ -242,6 +272,7 @@ class XHomeP2PProbe:
             responses = parse_client_connect_responses(packets)
             return {
                 "local_ip": local_ip,
+                "local_ips": local_ips,
                 "local_port": local_port,
                 "relay": {"host": self.relay[0], "port": self.relay[1]},
                 "client_connect_responses": [response.as_dict() for response in responses],
@@ -287,29 +318,33 @@ class XHomeP2PRendezvousProbe:
         interval: float = 0.05,
         kcp_start_command: int | None = None,
         kcp_start_interval: float = 0.5,
+        on_ready: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.bind(("0.0.0.0", 0))
             sock.settimeout(self.timeout)
             local_ip = best_effort_local_ip()
+            local_ips = best_effort_local_ips()
             local_port = sock.getsockname()[1]
             port_token = str(local_port)
-            connect_payload = build_client_connect_payload(uid=self.uid, local_ip=local_ip, local_port=local_port)
-            punch_payload = build_peer_punch_payload(uid=self.uid, port_token=port_token)
+            connect_payload = build_client_connect_payload_for_ips(uid=self.uid, local_ips=local_ips, local_port=local_port)
             relay_info_payload = build_uid_payload(uid=self.uid, include_key=True)
             heartbeat_payload = build_uid_payload(uid=self.uid)
+            relay_touch_payload = build_relay_touch_payload(uid=self.uid)
             packets: list[UdpPacket] = []
             responses: list[ClientConnectResponse] = []
             response_keys: set[str] = set()
             candidates: dict[tuple[str, int, P2PAddressKind], P2PAddress] = {}
             selected_peer: tuple[str, int] | None = None
+            ready_notified = False
             sent_counts: dict[str, int] = {
                 "relay_touch": 0,
                 "client_connect": 0,
                 "direct_punch": 0,
                 "punch_response": 0,
                 "relay_info": 0,
+                "relay_touch_channel4": 0,
                 "heartbeat": 0,
                 "kcp_start": 0,
             }
@@ -330,7 +365,17 @@ class XHomeP2PRendezvousProbe:
                     if candidate.kind == P2PAddressKind.RELAY:
                         sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
                         sent_counts["relay_info"] += 1
+                        sock.sendto(
+                            encode_udp_packet(
+                                P2PPacketType.DIRECT_KCP_DATA,
+                                relay_touch_payload,
+                                channel=RAW_CHANNEL,
+                            ),
+                            candidate.address,
+                        )
+                        sent_counts["relay_touch_channel4"] += 1
                     else:
+                        punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
                         sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
                         sent_counts["direct_punch"] += 1
 
@@ -367,6 +412,9 @@ class XHomeP2PRendezvousProbe:
                         P2PPacketType.RELAY_KCP_DATA,
                     }:
                         selected_peer = addr
+                        if on_ready is not None and not ready_notified:
+                            on_ready()
+                            ready_notified = True
                 time.sleep(interval)
 
             return {
@@ -579,3 +627,20 @@ def best_effort_local_ip() -> str:
         return "127.0.0.1"
     finally:
         probe.close()
+
+
+def best_effort_local_ips() -> list[str]:
+    """Return likely local candidate IPs for native type-6 rendezvous payloads."""
+
+    addresses: list[str] = []
+    first = best_effort_local_ip()
+    if first != "127.0.0.1":
+        addresses.append(first)
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, family=socket.AF_INET):
+            host = info[4][0]
+            if host and not host.startswith("127.") and host not in addresses:
+                addresses.append(host)
+    except OSError:
+        pass
+    return addresses or [first]
