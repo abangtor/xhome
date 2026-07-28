@@ -11,8 +11,10 @@ This sidecar layer reimplements the transport in portable Python.
 5. strip the 40-byte XHome media header
 6. forward raw H.264/G.711/JPEG payloads to files, ffmpeg, or go2rtc
 
-The implemented Python path currently covers steps 1-3 plus the first UDP relay
-probe. KCP session setup and media extraction are the next pieces.
+The implemented Python path currently covers steps 1-4, passive KCP media
+receive/ACK handling, and offline media extraction from successful app PCAPs.
+The remaining live gap is making the device publish media packets to this
+Python client from the Home Assistant network path.
 
 ## Portable Cloud Probe
 
@@ -80,6 +82,23 @@ Assistant integration requirements:
 ```bash
 pip install "xhome-api[live]"
 ```
+
+## PCAP Media Extraction
+
+`pcap-extract` validates the parser against successful Android app captures. It
+supports PCAPdroid raw-IP captures and tcpdump Ethernet PCAPs:
+
+```bash
+python -m xhome.live_sidecar pcap-extract xhome-live-app.pcap \
+  --jpeg-dir /tmp/xhome-jpegs \
+  --h264-out /tmp/xhome.h264 \
+  --g711-out /tmp/xhome.g711
+```
+
+The first successful capture decoded as relay packet type `19`, UDP channel `2`,
+KCP conversation id `0x11223345`, KCP push command `81`, then command-`8`
+app-media fragments. The observed live-view window yielded JPEG frames
+(`media_type=165`), not H.264.
 
 ## Callback Capture Format
 

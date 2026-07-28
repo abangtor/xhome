@@ -25,6 +25,7 @@ from .live import (
     live_session_from_token_payload,
 )
 from .live_p2p import XHomeP2PProbe, XHomeP2PRendezvousProbe
+from .live_pcap import extract_pcap_media
 from .live_transport import XHomeLiveCloudTransport, extract_p2p_servers
 
 RECORD_MAGIC = b"XHF1"
@@ -95,6 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     strip.add_argument("--g711-out", type=Path)
     strip.add_argument("--jpeg-dir", type=Path)
     strip.set_defaults(func=cmd_strip_callbacks)
+
+    pcap = subparsers.add_parser("pcap-extract", help="Extract media from an app PCAP capture")
+    pcap.add_argument("input", type=Path)
+    pcap.add_argument("--h264-out", type=Path)
+    pcap.add_argument("--g711-out", type=Path)
+    pcap.add_argument("--jpeg-dir", type=Path)
+    pcap.set_defaults(func=cmd_pcap_extract)
 
     explain = subparsers.add_parser("helper-contract", help="Print the native-helper stdio protocol")
     explain.set_defaults(func=cmd_helper_contract)
@@ -197,6 +205,15 @@ def cmd_strip_callbacks(args: argparse.Namespace) -> dict[str, Any]:
             auto_start=False,
         )
     return stats.as_dict()
+
+
+def cmd_pcap_extract(args: argparse.Namespace) -> dict[str, Any]:
+    return extract_pcap_media(
+        args.input,
+        h264_out=args.h264_out,
+        g711_out=args.g711_out,
+        jpeg_dir=args.jpeg_dir,
+    ).as_dict()
 
 
 def cmd_helper_contract(args: argparse.Namespace) -> dict[str, Any]:

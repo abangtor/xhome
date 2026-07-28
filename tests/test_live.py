@@ -32,6 +32,7 @@ from xhome.live_p2p import (
     encode_udp_packet,
     parse_client_connect_responses,
 )
+from xhome.live_pcap import extract_pcap_media
 from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks, unique_p2p_relays
 from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
@@ -182,6 +183,33 @@ class LiveSidecarTests(unittest.TestCase):
             self.assertEqual(stats.g711_frames, 1)
             self.assertEqual(h264.read_bytes(), b"video")
             self.assertEqual(g711.read_bytes(), b"audio")
+
+    def test_pcap_extract_writes_jpeg_frames(self):
+        def app_payload(flag: int, payload: bytes) -> bytes:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return bytes(header) + payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pcap = tmp_path / "sample.pcap"
+            write_raw_ip_pcap(
+                pcap,
+                [
+                    xhome_udp_kcp_datagram(app_payload(1, b"\xff\xd8")),
+                    xhome_udp_kcp_datagram(app_payload(2, b"\xff\xd9")),
+                ],
+            )
+            jpeg_dir = tmp_path / "jpeg"
+
+            stats = extract_pcap_media(pcap, jpeg_dir=jpeg_dir)
+
+            self.assertEqual(stats.jpeg_frames, 1)
+            self.assertEqual((jpeg_dir / "frame-000001.jpg").read_bytes(), b"\xff\xd8\xff\xd9")
 
 
 class LiveTransportTests(unittest.TestCase):
@@ -385,6 +413,57 @@ class LiveKcpTests(unittest.TestCase):
     def test_strip_uid_suffix_only_when_present(self):
         self.assertEqual(strip_uid_suffix(b"abcLSV", "LSV"), b"abc")
         self.assertEqual(strip_uid_suffix(b"abc", "LSV"), b"abc")
+
+
+def xhome_udp_kcp_datagram(app_payload: bytes) -> bytes:
+    kcp = (
+        MEDIA_CONV_ID.to_bytes(4, "little")
+        + bytes([81, 0])
+        + (32).to_bytes(2, "little")
+        + (1).to_bytes(4, "little")
+        + (1).to_bytes(4, "little")
+        + (0).to_bytes(4, "little")
+        + len(app_payload).to_bytes(4, "little")
+        + app_payload
+    )
+    return encode_udp_packet(P2PPacketType.RELAY_KCP_DATA, kcp, channel=2)
+
+
+def write_raw_ip_pcap(path: Path, udp_payloads: list[bytes]) -> None:
+    records = bytearray()
+    for index, udp_payload in enumerate(udp_payloads, start=1):
+        source = bytes([8, 222, 151, 25])
+        destination = bytes([10, 215, 173, 1])
+        udp_header = (
+            (9792).to_bytes(2, "big")
+            + (58450).to_bytes(2, "big")
+            + (8 + len(udp_payload)).to_bytes(2, "big")
+            + b"\x00\x00"
+        )
+        ip_packet = (
+            b"\x45\x00"
+            + (20 + len(udp_header) + len(udp_payload)).to_bytes(2, "big")
+            + b"\x00\x00\x00\x00\x40\x11\x00\x00"
+            + source
+            + destination
+            + udp_header
+            + udp_payload
+        )
+        records.extend((index).to_bytes(4, "little"))
+        records.extend((0).to_bytes(4, "little"))
+        records.extend(len(ip_packet).to_bytes(4, "little"))
+        records.extend(len(ip_packet).to_bytes(4, "little"))
+        records.extend(ip_packet)
+    path.write_bytes(
+        b"\xd4\xc3\xb2\xa1"
+        + (2).to_bytes(2, "little")
+        + (4).to_bytes(2, "little")
+        + (0).to_bytes(4, "little")
+        + (0).to_bytes(4, "little")
+        + (65535).to_bytes(4, "little")
+        + (101).to_bytes(4, "little")
+        + bytes(records)
+    )
 
 
 if __name__ == "__main__":
