@@ -38,6 +38,16 @@ class FakeSession:
         return self.response
 
 
+class FakeSequenceSession:
+    def __init__(self, responses):
+        self.responses = [response if isinstance(response, FakeResponse) else FakeResponse(response) for response in responses]
+        self.calls = []
+
+    def request(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.responses.pop(0)
+
+
 class SigningTests(unittest.TestCase):
     def test_sha1_hex(self):
         self.assertEqual(sha1_hex("abc"), "a9993e364706816aba3e25717850c26c9cd0d89d")
@@ -84,6 +94,27 @@ class ClientTests(unittest.TestCase):
 
         _, kwargs = session.calls[0]
         self.assertEqual(kwargs["params"], {"uuid": "abc"})
+
+    def test_list_devices_resilient_falls_back_from_all_device_400(self):
+        session = FakeSequenceSession(
+            [
+                FakeResponse({"message": "bad request"}, status_code=400),
+                FakeResponse([{"uid": "abc"}]),
+            ]
+        )
+        client = XHomeClient(token="tok", session=session)
+
+        self.assertEqual(client.list_devices_resilient(), [{"uid": "abc"}])
+        self.assertEqual(session.calls[0][0][1], "https://chniot.lancens.com:6448/v1/api/user/all/device/list")
+        self.assertEqual(session.calls[1][0][1], "https://chniot.lancens.com:6448/v1/api/user/device")
+
+    def test_list_devices_resilient_keeps_non_400_errors_visible(self):
+        session = FakeSequenceSession([FakeResponse({"message": "server error"}, status_code=500)])
+        client = XHomeClient(token="tok", session=session)
+
+        with self.assertRaises(XHomeAPIError):
+            client.list_devices_resilient()
+        self.assertEqual(len(session.calls), 1)
 
     def test_open_lock_body_uses_uuid_and_signed_timestamp(self):
         session = FakeSession({"message": "ok"})

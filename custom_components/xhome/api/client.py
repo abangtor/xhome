@@ -97,6 +97,16 @@ class XHomeClient:
     def list_all_devices(self) -> JSON:
         return self.get("v1/api/user/all/device/list")
 
+    def list_devices_resilient(self) -> JSON:
+        """Return the richest available device list, falling back when needed."""
+
+        try:
+            return self.list_all_devices()
+        except XHomeAPIError as err:
+            if err.status_code != 400:
+                raise
+        return self.list_devices()
+
     def list_devices(self) -> JSON:
         """Return the main-device list endpoint."""
 
@@ -105,7 +115,7 @@ class XHomeClient:
     def flatten_devices(self, payload: JSON | None = None) -> list[dict[str, Any]]:
         """Flatten either XHome device-list response shape into one list."""
 
-        data = unwrap_response(self.list_all_devices() if payload is None else payload)
+        data = unwrap_response(self.list_devices_resilient() if payload is None else payload)
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         if not isinstance(data, dict):

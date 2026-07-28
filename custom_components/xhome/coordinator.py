@@ -666,7 +666,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Synchronous data update helper."""
 
         self._ensure_login()
-        payload = self.client.list_all_devices()
+        payload = self.client.list_devices_resilient()
         devices = self.client.flatten_devices(payload)
         runtime_devices: dict[str, XHomeDeviceRuntimeData] = {}
 
