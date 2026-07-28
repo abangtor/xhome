@@ -47,7 +47,10 @@ ha_entity_platform = _install_module("homeassistant.helpers.entity_platform")
 ha_entity_platform.AddEntitiesCallback = object
 
 xhome_const = _install_module("custom_components.xhome.const")
+xhome_const.CONF_IMAGE_ROTATION = "image_rotation"
+xhome_const.DEFAULT_IMAGE_ROTATION = 0
 xhome_const.DOMAIN = "xhome"
+xhome_const.IMAGE_ROTATIONS = [0, 90, 180, 270]
 
 xhome_coordinator = _install_module("custom_components.xhome.coordinator")
 xhome_coordinator.XHomeDataUpdateCoordinator = object
@@ -83,6 +86,7 @@ class ImageEntityTests(unittest.TestCase):
     def test_latest_event_image_initializes_image_access_token(self):
         coordinator = types.SimpleNamespace(
             hass=object(),
+            config_entry=types.SimpleNamespace(options={}),
             latest_event_media=lambda uid: None,
             downloaded_event_media=lambda uid: None,
         )
@@ -91,6 +95,14 @@ class ImageEntityTests(unittest.TestCase):
 
         self.assertEqual(entity.uid, "abc")
         self.assertEqual(entity.access_tokens[-1], "token")
+
+    def test_image_rotation_degrees_normalizes_options(self):
+        self.assertEqual(image.image_rotation_degrees({"image_rotation": "90"}), 90)
+        self.assertEqual(image.image_rotation_degrees({"image_rotation": "bad"}), 0)
+        self.assertEqual(image.image_rotation_degrees({"image_rotation": "45"}), 0)
+
+    def test_rotate_image_bytes_noops_without_rotation(self):
+        self.assertEqual(image.rotate_image_bytes(b"not really an image", 0, "image/jpeg"), b"not really an image")
 
 
 if __name__ == "__main__":

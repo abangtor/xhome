@@ -16,16 +16,19 @@ from homeassistant.helpers import selector
 from .api import XHomeAPIError, XHomeAuthError, XHomeClient, XHomeError
 from .const import (
     CONF_EVENT_SCAN_INTERVAL,
+    CONF_IMAGE_ROTATION,
     CONF_LOCAL_PUSH_ENABLED,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_EVENT_SCAN_INTERVAL,
+    DEFAULT_IMAGE_ROTATION,
     DEFAULT_LOCAL_PUSH_ENABLED,
     DEFAULT_REGION,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIMEOUT,
     DOMAIN,
+    IMAGE_ROTATIONS,
     REGIONS,
 )
 
@@ -71,6 +74,7 @@ class XHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_EVENT_SCAN_INTERVAL: user_input.get(
                             CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL
                         ),
+                        CONF_IMAGE_ROTATION: user_input.get(CONF_IMAGE_ROTATION, DEFAULT_IMAGE_ROTATION),
                         CONF_LOCAL_PUSH_ENABLED: user_input.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
                         CONF_TIMEOUT: user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
                     },
@@ -119,6 +123,15 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
                     vol.Required(
+                        CONF_IMAGE_ROTATION,
+                        default=str(self._config_entry.options.get(CONF_IMAGE_ROTATION, DEFAULT_IMAGE_ROTATION)),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[str(rotation) for rotation in IMAGE_ROTATIONS],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Required(
                         CONF_LOCAL_PUSH_ENABLED,
                         default=self._config_entry.options.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),
                     ): bool,
@@ -152,6 +165,15 @@ def _user_schema(user_input: dict[str, Any] | None) -> vol.Schema:
                 CONF_EVENT_SCAN_INTERVAL,
                 default=user_input.get(CONF_EVENT_SCAN_INTERVAL, DEFAULT_EVENT_SCAN_INTERVAL),
             ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+            vol.Required(
+                CONF_IMAGE_ROTATION,
+                default=str(user_input.get(CONF_IMAGE_ROTATION, DEFAULT_IMAGE_ROTATION)),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[str(rotation) for rotation in IMAGE_ROTATIONS],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Required(
                 CONF_LOCAL_PUSH_ENABLED,
                 default=user_input.get(CONF_LOCAL_PUSH_ENABLED, DEFAULT_LOCAL_PUSH_ENABLED),

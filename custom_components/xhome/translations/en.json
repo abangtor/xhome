@@ -10,6 +10,7 @@
           "region": "Region",
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
+          "image_rotation": "Latest event image rotation",
           "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }
@@ -32,6 +33,7 @@
           "region": "Region",
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
+          "image_rotation": "Latest event image rotation",
           "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }

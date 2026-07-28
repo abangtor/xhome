@@ -26,6 +26,13 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
         self.assertIn("self._config_entry.options.get(\n                            CONF_REGION", source)
         self.assertIn("selector.SelectSelectorConfig(options=REGIONS)", source)
 
+    def test_image_rotation_option_is_available(self):
+        source = CONFIG_FLOW_PATH.read_text()
+
+        self.assertIn("CONF_IMAGE_ROTATION", source)
+        self.assertIn("IMAGE_ROTATIONS", source)
+        self.assertIn("selector.SelectSelectorMode.DROPDOWN", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -203,6 +203,10 @@ Some XHome event records contain a direct image URL, while others only contain
 an `event_guid`; in that case the coordinator uses the app's OSS media endpoint
 to resolve the signed image URL.
 
+If the latest-event image is sideways, set the integration option `Latest event
+image rotation` to `90`, `180`, or `270`. The option rotates the image bytes
+served by the entity and does not change the camera/device configuration.
+
 Each device also has a `Fetch latest event media` button. Pressing it polls the
 latest cloud event for that device, resolves available OSS media, and saves the
 latest image and any event video clip under Home Assistant's `media/xhome/...`
