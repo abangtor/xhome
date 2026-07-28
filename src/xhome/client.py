@@ -11,6 +11,7 @@ import requests
 from .constants import API_KEY, BUNDLE_ID, ROUTE_BASE_URLS, normalize_region
 from .exceptions import XHomeAPIError, XHomeAuthError
 from .models import LoginSession, Region
+from .password import encode_temporary_password
 from .signing import login_sign, token_time_sign
 
 JSON = dict[str, Any] | list[Any] | str | int | float | bool | None
@@ -454,6 +455,41 @@ class XHomeClient:
             auth_type=auth_type,
             data=data,
             rand_key=rand_key,
+        )
+
+    def add_temporary_password(
+        self,
+        uuid: str,
+        *,
+        name: str,
+        password: str,
+        begin_time: int = 0,
+        end_time: int = 0,
+        start_time: int = 0,
+        stop_time: int = 0,
+        total_times: int = 0,
+        week: int = 0,
+        user_type: int = 2,
+        auth_type: int = 1,
+        entry: str = "app",
+    ) -> JSON:
+        """Encode and submit a temporary password/auth record."""
+
+        data, rand_key = encode_temporary_password(password, uuid)
+        return self.add_temporary_password_raw(
+            uuid,
+            name=name,
+            data=data,
+            rand_key=rand_key,
+            begin_time=begin_time,
+            end_time=end_time,
+            start_time=start_time,
+            stop_time=stop_time,
+            total_times=total_times,
+            week=week,
+            user_type=user_type,
+            auth_type=auth_type,
+            entry=entry,
         )
 
     def update_auth_name(self, uuid: str, ids: str | int | list[int], name: str, entry: str = "app") -> JSON:

@@ -343,8 +343,8 @@ Outcome: richer device support, but with much higher complexity.
   out of scope for the first integration.
 - The device currently reports `gms=0`; account-wide GMS list is empty, and
   device/model GMS reads returned `10009` in live testing.
-- Temporary password/auth list, rename, delete, and raw-add submission are
-  implemented. Human-friendly temporary password generation still needs the
-  native `IVIEWSPassword`/`IVIEWSPSD` encoder or a reimplementation.
+- Temporary password/auth list, rename, delete, raw-add submission, and
+  human-friendly add are implemented. The native `IVIEWSPassword`/`IVIEWSPSD`
+  encoder was recovered as AES-CBC with `uuid[4:20]` as key and `rand_key` as IV.
 - Region must be validated by login. The tested account is in the `usa` API
   region even though the physical location is Malaysia.

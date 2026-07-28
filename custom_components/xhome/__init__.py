@@ -35,6 +35,7 @@ CONF_REMARKS = "remarks"
 CONF_SDK = "sdk"
 CONF_START_TIME = "start_time"
 CONF_STOP_TIME = "stop_time"
+CONF_TEMPORARY_PASSWORD = "password"
 CONF_TOTAL_TIMES = "total_times"
 CONF_UID = "uid"
 CONF_UNLOCK_TYPE = "unlock_type"
@@ -42,6 +43,7 @@ CONF_USER_TYPE = "user_type"
 CONF_WEEK = "week"
 
 SERVICE_ADD_TEMPORARY_PASSWORD_RAW = "add_temporary_password_raw"
+SERVICE_ADD_TEMPORARY_PASSWORD = "add_temporary_password"
 SERVICE_DELETE_TEMPORARY_PASSWORD = "delete_temporary_password"
 SERVICE_GET_APP_LOCK_STATUS = "get_app_lock_status"
 SERVICE_GET_SCREEN_LIGHT_CONFIG = "get_screen_light_config"
@@ -218,6 +220,28 @@ def _register_api_services(hass: HomeAssistant) -> None:
             entry=call.data[CONF_ENTRY],
         )
 
+    async def handle_add_temporary_password(call: ServiceCall) -> dict[str, Any]:
+        _require_confirmed(call)
+        return await _call_client_response(
+            hass,
+            call,
+            "temporary password add",
+            "add_temporary_password",
+            call.data[CONF_UID],
+            uid=call.data[CONF_UID],
+            name=call.data[CONF_NAME],
+            password=call.data[CONF_TEMPORARY_PASSWORD],
+            begin_time=call.data.get(CONF_BEGIN_TIME, 0),
+            end_time=call.data.get(CONF_END_TIME, 0),
+            start_time=call.data.get(CONF_START_TIME, 0),
+            stop_time=call.data.get(CONF_STOP_TIME, 0),
+            total_times=call.data.get(CONF_TOTAL_TIMES, 0),
+            week=call.data.get(CONF_WEEK, 0),
+            user_type=call.data.get(CONF_USER_TYPE, 2),
+            auth_type=call.data.get(CONF_AUTH_TYPE, 1),
+            entry=call.data[CONF_ENTRY],
+        )
+
     async def handle_rename_temporary_password(call: ServiceCall) -> dict[str, Any]:
         return await _call_client_response(
             hass,
@@ -326,6 +350,26 @@ def _register_api_services(hass: HomeAssistant) -> None:
             vol.Required(CONF_NAME): cv.string,
             vol.Required(CONF_DATA): cv.string,
             vol.Required(CONF_RAND_KEY): cv.string,
+            vol.Required(CONF_CONFIRM): cv.boolean,
+            vol.Optional(CONF_BEGIN_TIME, default=0): vol.Coerce(int),
+            vol.Optional(CONF_END_TIME, default=0): vol.Coerce(int),
+            vol.Optional(CONF_START_TIME, default=0): vol.Coerce(int),
+            vol.Optional(CONF_STOP_TIME, default=0): vol.Coerce(int),
+            vol.Optional(CONF_TOTAL_TIMES, default=0): vol.Coerce(int),
+            vol.Optional(CONF_WEEK, default=0): vol.Coerce(int),
+            vol.Optional(CONF_USER_TYPE, default=2): vol.Coerce(int),
+            vol.Optional(CONF_AUTH_TYPE, default=1): vol.Coerce(int),
+        },
+    )
+    _register_service(
+        hass,
+        SERVICE_ADD_TEMPORARY_PASSWORD,
+        handle_add_temporary_password,
+        {
+            **_UID_SCHEMA,
+            **_ENTRY_SCHEMA,
+            vol.Required(CONF_NAME): cv.string,
+            vol.Required(CONF_TEMPORARY_PASSWORD): cv.string,
             vol.Required(CONF_CONFIRM): cv.boolean,
             vol.Optional(CONF_BEGIN_TIME, default=0): vol.Coerce(int),
             vol.Optional(CONF_END_TIME, default=0): vol.Coerce(int),

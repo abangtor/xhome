@@ -133,17 +133,9 @@ Android app uses simple REST setters:
 - Night vision target EV number when the device reports EV bounds
 - Standby mode select with normal standby and trigger mode
 
-The same REST setters are also exposed as services for automation or Developer
-Tools use:
+Read-only/helper services are exposed for automation or Developer Tools use:
 
 - `xhome.get_screen_light_config`
-- `xhome.set_screen_light_timeout`
-- `xhome.set_battery_display`
-- `xhome.set_weather_forecast`
-- `xhome.set_call_screen`
-- `xhome.set_standby_mode`
-- `xhome.set_target_ev`
-- `xhome.set_remote_unlock_limit`
 - `xhome.get_app_lock_status`
 - `xhome.set_unlock_type`
 
@@ -156,16 +148,20 @@ implemented in the Python client and exposed as Home Assistant services:
 - `xhome.upsert_lock_member`
 - `xhome.update_event_member`
 - `xhome.list_temporary_passwords`
+- `xhome.add_temporary_password`
 - `xhome.add_temporary_password_raw`
 - `xhome.rename_temporary_password`
 - `xhome.delete_temporary_password`
 
-`add_temporary_password_raw` intentionally accepts only an already encoded
-`data` blob and `rand_key`. The Android app creates that `data` value with the
-native `IVIEWSPassword`/`IVIEWSPSD` library. The native library is available from
-the XAPK split now, but the encoder has not been recovered or reimplemented yet.
-Access-changing services such as raw temporary-password add/delete require
-`confirm: true`.
+`add_temporary_password` reimplements the Android `IVIEWSPassword` encoder from
+`libIVIEWSPSD.so`: AES-CBC over the password using `uuid[4:20]` as key, a
+16-character app-style `rand_key` as IV, and base64 ciphertext as `data`.
+`add_temporary_password_raw` remains available for submitting an already encoded
+`data` blob and `rand_key`. Access-changing services such as temporary-password
+add/delete require `confirm: true`.
+
+The CLI exposes the same split as `xhome auth-add --password ... --yes` and
+`xhome auth-add-raw --data ... --rand-key ... --yes`.
 
 ## Events
 

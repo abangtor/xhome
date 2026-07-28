@@ -222,6 +222,22 @@ def build_parser() -> argparse.ArgumentParser:
     auth_all = subparsers.add_parser("auth-all", help="List all auth entries")
     auth_all.set_defaults(func=lambda args: logged_in_client(args).list_all_auth())
 
+    auth_add = subparsers.add_parser("auth-add", help="Add a temporary-password/auth entry")
+    auth_add.add_argument("uuid")
+    auth_add.add_argument("--name", required=True)
+    auth_add.add_argument("--password", required=True)
+    auth_add.add_argument("--begin-time", type=int, default=0)
+    auth_add.add_argument("--end-time", type=int, default=0)
+    auth_add.add_argument("--start-time", type=int, default=0)
+    auth_add.add_argument("--stop-time", type=int, default=0)
+    auth_add.add_argument("--total-times", type=int, default=0)
+    auth_add.add_argument("--week", type=int, default=0)
+    auth_add.add_argument("--user-type", type=int, default=2)
+    auth_add.add_argument("--auth-type", type=int, default=1)
+    auth_add.add_argument("--entry", default="app")
+    auth_add.add_argument("--yes", action="store_true")
+    auth_add.set_defaults(func=cmd_auth_add)
+
     auth_add_raw = subparsers.add_parser("auth-add-raw", help="Submit a pre-encoded temporary-password/auth entry")
     auth_add_raw.add_argument("uuid")
     auth_add_raw.add_argument("--name", required=True)
@@ -428,6 +444,25 @@ def cmd_event_member(args: argparse.Namespace) -> Any:
         args.event_user_id,
         args.member_type,
         args.remarks,
+    )
+
+
+def cmd_auth_add(args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise SystemExit("Refusing to add a temporary-password/auth entry without --yes")
+    return logged_in_client(args).add_temporary_password(
+        args.uuid,
+        name=args.name,
+        password=args.password,
+        begin_time=args.begin_time,
+        end_time=args.end_time,
+        start_time=args.start_time,
+        stop_time=args.stop_time,
+        total_times=args.total_times,
+        week=args.week,
+        user_type=args.user_type,
+        auth_type=args.auth_type,
+        entry=args.entry,
     )
 
 

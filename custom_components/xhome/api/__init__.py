@@ -3,6 +3,7 @@
 from .client import XHomeClient
 from .exceptions import XHomeAPIError, XHomeAuthError, XHomeError, XHomePushError
 from .models import LoginSession, Region
+from .password import XHomePasswordError, decode_temporary_password, encode_temporary_password, generate_rand_key
 from .push import XHomePushClient, XHomePushFrame, XHomePushMessage
 
 __all__ = [
@@ -12,8 +13,12 @@ __all__ = [
     "XHomeAuthError",
     "XHomeClient",
     "XHomeError",
+    "XHomePasswordError",
     "XHomePushClient",
     "XHomePushError",
     "XHomePushFrame",
     "XHomePushMessage",
+    "decode_temporary_password",
+    "encode_temporary_password",
+    "generate_rand_key",
 ]

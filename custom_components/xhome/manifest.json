@@ -7,7 +7,6 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/abangtor/xhome/issues",
-  "requirements": ["requests>=2.31"],
+  "requirements": ["cryptography>=42", "requests>=2.31"],
   "version": "0.1.0"
 }
-

@@ -22,6 +22,7 @@ class HomeAssistantServiceTests(unittest.TestCase):
             "upsert_lock_member",
             "update_event_member",
             "list_temporary_passwords",
+            "add_temporary_password",
             "add_temporary_password_raw",
             "rename_temporary_password",
             "delete_temporary_password",

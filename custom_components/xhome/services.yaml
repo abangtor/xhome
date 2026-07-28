@@ -223,6 +223,74 @@ add_temporary_password_raw:
       selector:
         text:
 
+add_temporary_password:
+  name: Add temporary password
+  description: Encode and submit a temporary-password/auth record.
+  fields:
+    uid:
+      required: true
+      selector:
+        text:
+    name:
+      required: true
+      selector:
+        text:
+    password:
+      required: true
+      selector:
+        text:
+    begin_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    end_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    start_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    stop_time:
+      default: 0
+      selector:
+        number:
+          mode: box
+    total_times:
+      default: 0
+      selector:
+        number:
+          mode: box
+    week:
+      default: 0
+      selector:
+        number:
+          mode: box
+    user_type:
+      default: 2
+      selector:
+        number:
+          mode: box
+    auth_type:
+      default: 1
+      selector:
+        number:
+          mode: box
+    entry:
+      default: app
+      selector:
+        text:
+    confirm:
+      required: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        text:
+
 rename_temporary_password:
   name: Rename temporary password
   description: Rename one or more temporary-password/auth records.

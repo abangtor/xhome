@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from xhome import XHomeAPIError, XHomeAuthError, XHomeClient
 from xhome.constants import API_KEY
@@ -330,6 +331,21 @@ class ClientTests(unittest.TestCase):
         args, kwargs = session.calls[0]
         self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/app/safe/lock")
         self.assertEqual(kwargs["json"], {"safe_password": "safe-pass", "entry": "app"})
+
+    def test_add_temporary_password_encodes_plain_password(self):
+        session = FakeSession({"message": "ok"})
+        client = XHomeClient(token="tok", session=session)
+
+        with patch("xhome.client.encode_temporary_password", return_value=("encoded", "rand")):
+            client.add_temporary_password("abcd1234567890abcdef", name="Guest", password="246810")
+
+        args, kwargs = session.calls[0]
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(args[1], "https://chniot.lancens.com:6448/v1/api/device/iviews/auth/add")
+        self.assertEqual(kwargs["json"]["uuid"], "abcd1234567890abcdef")
+        self.assertEqual(kwargs["json"]["name"], "Guest")
+        self.assertEqual(kwargs["json"]["data"], "encoded")
+        self.assertEqual(kwargs["json"]["rand_key"], "rand")
 
     def test_register_push_tokens_posts_call_and_message_tokens(self):
         session = FakeSession({"message": "ok"})
