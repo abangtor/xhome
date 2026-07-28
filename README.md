@@ -246,8 +246,9 @@ The repo now includes the first receive-only sidecar surface in
 `xhome.live_sidecar`, plus a portable Python reimplementation of the native IoT
 TLS login phase and the first UDP relay probe. The implemented Python path can
 log in to `usaiotd.lancens.com:11201`, send command `20`, receive command `9`
-with P2P relay addresses, and talk to the returned UDP relay. KCP/media relay is
-still the remaining streaming layer. See `docs/XHOME_LIVE_SIDECAR.md`.
+with P2P relay addresses, talk to the returned UDP relay, parse peer candidates,
+and run the native-shaped UDP rendezvous probe. KCP/media relay is still the
+remaining streaming layer. See `docs/XHOME_LIVE_SIDECAR.md`.
 
 ## Development Roadmap
 

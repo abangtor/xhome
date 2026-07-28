@@ -24,8 +24,8 @@ from .live import (
     callback_to_media_frame,
     live_session_from_token_payload,
 )
+from .live_p2p import XHomeP2PProbe, XHomeP2PRendezvousProbe
 from .live_transport import XHomeLiveCloudTransport, extract_p2p_servers
-from .live_p2p import XHomeP2PProbe
 
 RECORD_MAGIC = b"XHF1"
 RECORD_HEADER = struct.Struct("<4siiiI")
@@ -107,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--timeout", type=float, default=10.0)
     probe.add_argument("--send-start", action="store_true", help="Send command 20 after login, then command 21 before exit")
     probe.add_argument("--p2p-probe", action="store_true", help="Probe the first returned UDP relay after command 9")
+    probe.add_argument(
+        "--p2p-rendezvous",
+        action="store_true",
+        help="Run the native-shaped UDP rendezvous probe against returned relays",
+    )
     probe.add_argument(
         "--insecure-skip-verify",
         action="store_true",
@@ -224,7 +229,9 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
             transport.send_frame(metadata.stop_command)
 
     p2p_probe = None
+    p2p_rendezvous = None
     p2p_servers = extract_p2p_servers(frames)
+    p2p_relays = unique_p2p_relays(p2p_servers)
     if args.p2p_probe and p2p_servers:
         first = p2p_servers[0]
         p2p_probe = XHomeP2PProbe(
@@ -232,6 +239,11 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
             relay_host=str(first["IP"]),
             relay_port=int(first["Port"]),
         ).run()
+    if args.p2p_rendezvous and p2p_relays:
+        p2p_rendezvous = XHomeP2PRendezvousProbe(
+            uid=args.uid,
+            relays=p2p_relays,
+        ).run(duration=args.duration)
 
     return {
         "frames": [
@@ -244,7 +256,21 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
         ],
         "p2p_servers": p2p_servers,
         "p2p_probe": p2p_probe,
+        "p2p_rendezvous": p2p_rendezvous,
     }
+
+
+def unique_p2p_relays(servers: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """Return unique relay host/port pairs from command-9 server entries."""
+
+    relays: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for server in servers:
+        relay = (str(server["IP"]), int(server["Port"]))
+        if relay not in seen:
+            seen.add(relay)
+            relays.append(relay)
+    return relays
 
 
 def relay_callbacks(

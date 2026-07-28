@@ -40,6 +40,27 @@ Add `--p2p-probe` with `--send-start` to send the first pure-Python UDP
 client-connecting packets to the returned relay. This is still a probe, not a
 complete KCP/media implementation.
 
+Add `--p2p-rendezvous` with `--send-start` to continue farther into the native
+client state machine. The rendezvous probe parses relay type-7 responses into
+local/public/relay peer candidates, sends type-11 direct punch packets, sends
+type-15 relay-info packets, answers type-11 peer handshakes with type-12
+responses, and reports any type-13/18/19 KCP data packets it sees.
+
+```bash
+python -m xhome.live_sidecar cloud-probe \
+  --uid LSV212PFJU5TQT42R3UX \
+  --token ... \
+  --native-iot-host usaiotd.lancens.com \
+  --send-start \
+  --p2p-rendezvous \
+  --insecure-skip-verify
+```
+
+The remaining implementation layer is KCP itself: native uses conversation
+`0x11223344` for channel 1 and `0x11223345` for channel 2, with
+`nodelay(1, 10, 2, 1)`. Once that is wired, channel 2 should carry the 40-byte
+XHome media-header records that can be stripped to H.264/G.711/JPEG.
+
 ## Callback Capture Format
 
 The older `relay` and `strip-callbacks` commands are kept as a capture/debugging

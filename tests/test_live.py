@@ -15,8 +15,19 @@ from xhome.live import (
     live_session_from_token_payload,
     parse_media_frame,
 )
-from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks
-from xhome.live_p2p import build_client_connect_payload, decode_udp_packet, encode_udp_packet
+from xhome.live_sidecar import encode_callback_record, iter_callback_records, relay_callbacks, unique_p2p_relays
+from xhome.live_p2p import (
+    P2PAddressKind,
+    P2PPacketType,
+    build_client_connect_payload,
+    build_peer_punch_payload,
+    build_peer_punch_response_payload,
+    build_uid_payload,
+    decode_udp_packet,
+    encode_kcp_udp_packet,
+    encode_udp_packet,
+    parse_client_connect_responses,
+)
 from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
     decode_native_frame_header,
@@ -165,6 +176,67 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(decoded["Port"], "54321")
         self.assertEqual(decoded["Key"], "54321")
         self.assertEqual(decoded["LocalIp"], [{"IP": "192.168.1.10"}])
+
+    def test_parse_client_connect_response_candidates(self):
+        payload = (
+            b'{"Uid":"LSV","PublicIp":"1.2.3.4","PublicPort":"5555","Online":"1","NatType":"0",'
+            b'"PeerPublicIP":"5.6.7.8","PeerPublicPort":"6666",'
+            b'"PeerLocalIP":[{"IP":"192.168.7.178"}],"PeerLocalPort":"7777",'
+            b'"RelayAddress":[{"IP":"8.8.8.8","Port":"9792"}]}'
+        )
+        packet = decode_udp_packet(encode_udp_packet(P2PPacketType.CLIENT_CONNECT_RESPONSE, payload))
+
+        response = parse_client_connect_responses([packet])[0]
+
+        self.assertEqual(response.public_ip, "1.2.3.4")
+        self.assertEqual(response.public_port, 5555)
+        self.assertEqual(
+            [(candidate.host, candidate.port, candidate.kind) for candidate in response.candidates],
+            [
+                ("192.168.7.178", 7777, P2PAddressKind.LOCAL),
+                ("5.6.7.8", 6666, P2PAddressKind.PUBLIC),
+                ("8.8.8.8", 9792, P2PAddressKind.RELAY),
+            ],
+        )
+
+    def test_punch_and_heartbeat_payloads_match_native_field_names(self):
+        punch = __import__("json").loads(build_peer_punch_payload(uid="LSV", port_token="54321"))
+        punch_response = __import__("json").loads(
+            build_peer_punch_response_payload(uid="LSV", port_token="54321")
+        )
+        relay_info = __import__("json").loads(build_uid_payload(uid="LSV", include_key=True))
+
+        self.assertEqual(punch, {"Uid": "LSV", "Key": "", "Port": "54321"})
+        self.assertEqual(punch_response["Uid"], "LSV")
+        self.assertEqual(punch_response["Key"], "")
+        self.assertEqual(punch_response["Port"], "54321")
+        self.assertIsInstance(punch_response["Time"], int)
+        self.assertEqual(relay_info, {"Uid": "LSV", "Key": ""})
+
+    def test_kcp_udp_packet_appends_uid_for_direct_relay_mode(self):
+        packet = decode_udp_packet(
+            encode_kcp_udp_packet(
+                P2PPacketType.DIRECT_KCP_DATA,
+                b"kcp",
+                channel=2,
+                uid_suffix="LSV212PFJU5TQT42R3UX",
+            )
+        )
+
+        self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
+        self.assertEqual(packet.channel, 2)
+        self.assertEqual(packet.payload, b"kcpLSV212PFJU5TQT42R3UX")
+
+    def test_unique_p2p_relays_dedupes_command_9_servers(self):
+        relays = unique_p2p_relays(
+            [
+                {"IP": "8.222.151.25", "Port": "9729"},
+                {"IP": "8.222.151.25", "Port": "9729"},
+                {"IP": "8.222.151.26", "Port": "9729"},
+            ]
+        )
+
+        self.assertEqual(relays, [("8.222.151.25", 9729), ("8.222.151.26", 9729)])
 
 
 if __name__ == "__main__":
