@@ -216,6 +216,9 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             "last_frame_at": None,
             "last_event_at": None,
             "registered_token_tail": None,
+            "push_host": None,
+            "tls_version": None,
+            "tls_cipher": None,
         }
         super().__init__(
             hass,
@@ -658,13 +661,21 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                     ),
                 )
                 self._local_push_client = push_client
-                self._local_push_status.update({"running": True, "last_error": None})
+                self._local_push_status.update(
+                    {
+                        "running": True,
+                        "last_error": None,
+                        "push_host": client.region.push_host,
+                    }
+                )
                 for message in push_client.iter_messages(stop_event=stop_event):
                     if stop_event.is_set():
                         break
                     self._local_push_status.update(
                         {
                             "connected": True,
+                            "tls_version": push_client.tls_version,
+                            "tls_cipher": push_client.tls_cipher,
                             "frames": int(self._local_push_status["frames"]) + 1,
                             "last_frame_command": message.command,
                             "last_frame_kind": message.kind,

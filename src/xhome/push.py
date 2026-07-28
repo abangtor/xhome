@@ -64,6 +64,7 @@ class XHomePushClient:
         verify_tls: bool = False,
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
         idle_reconnect_seconds: float = 130,
+        force_ipv4: bool = True,
     ) -> None:
         self.host = host
         self.port = port
@@ -72,16 +73,22 @@ class XHomePushClient:
         self.verify_tls = verify_tls
         self.max_payload_bytes = max_payload_bytes
         self.idle_reconnect_seconds = idle_reconnect_seconds
+        self.force_ipv4 = force_ipv4
         self._socket: ssl.SSLSocket | None = None
 
     def connect(self) -> None:
         """Connect and send the registration payload."""
 
-        raw_socket = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        raw_socket = _create_push_connection(
+            self.host,
+            self.port,
+            timeout=self.timeout,
+            force_ipv4=self.force_ipv4,
+        )
         raw_socket.settimeout(min(self.timeout, 5))
         try:
             context = _ssl_context(self.verify_tls)
-            tls_socket = context.wrap_socket(raw_socket, server_hostname=self.host if self.verify_tls else None)
+            tls_socket = context.wrap_socket(raw_socket, server_hostname=self.host)
         except Exception:
             raw_socket.close()
             raise
@@ -167,6 +174,21 @@ class XHomePushClient:
         if self._socket is None:
             raise XHomePushError("XHome push socket is not connected")
         return self._socket
+
+    @property
+    def tls_version(self) -> str | None:
+        """Return the negotiated TLS version, if connected."""
+
+        return self._socket.version() if self._socket is not None else None
+
+    @property
+    def tls_cipher(self) -> str | None:
+        """Return the negotiated TLS cipher name, if connected."""
+
+        if self._socket is None:
+            return None
+        cipher = self._socket.cipher()
+        return cipher[0] if cipher else None
 
 
 def build_push_register_info(
@@ -293,11 +315,55 @@ def _stable_push_identity(user_id: str, kind: str) -> str:
 
 def _ssl_context(verify_tls: bool) -> ssl.SSLContext:
     if verify_tls:
-        return ssl.create_default_context()
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+        context = ssl.create_default_context()
+    else:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+    # libIVIEWSPUSH.so behaves like an OpenSSL/TLS-1.2-era client. Some HA
+    # OpenSSL builds otherwise trigger a server-side handshake_failure alert.
+    try:
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+    except (AttributeError, ValueError):
+        pass
+    try:
+        context.set_ciphers("DEFAULT:@SECLEVEL=0")
+    except ssl.SSLError:
+        pass
     return context
+
+
+def _create_push_connection(
+    host: str,
+    port: int,
+    *,
+    timeout: float,
+    force_ipv4: bool,
+) -> socket.socket:
+    """Open the native push TCP socket."""
+
+    if not force_ipv4:
+        return socket.create_connection((host, port), timeout=timeout)
+
+    errors: list[OSError] = []
+    for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
+        host,
+        port,
+        family=socket.AF_INET,
+        type=socket.SOCK_STREAM,
+    ):
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as err:
+            errors.append(err)
+            sock.close()
+    if errors:
+        raise errors[-1]
+    raise OSError(f"No IPv4 address found for XHome push host {host!r}")
 
 
 def _decode_base64_text(value: str) -> str:

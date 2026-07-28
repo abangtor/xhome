@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import ssl
 import struct
 import unittest
 
@@ -12,6 +13,7 @@ from xhome.push import (
     build_push_register_info,
     decode_push_header,
     encode_push_frame,
+    _ssl_context,
     parse_push_event,
     parse_push_frame,
     parse_push_token,
@@ -36,6 +38,14 @@ class PushProtocolTests(unittest.TestCase):
         self.assertEqual(frame[:8], struct.pack("<ii", 3, 5))
         self.assertEqual(frame[8:], b"hello")
         self.assertEqual(decode_push_header(frame[:8]), (3, 5))
+
+    def test_push_tls_context_is_app_compatible(self):
+        context = _ssl_context(False)
+
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, ssl.CERT_NONE)
+        if hasattr(ssl, "TLSVersion"):
+            self.assertEqual(context.maximum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_parse_push_token(self):
         payload = b'{"token":"push-token"}'
