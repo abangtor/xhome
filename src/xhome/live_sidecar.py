@@ -113,6 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the native-shaped UDP rendezvous probe against returned relays",
     )
     probe.add_argument(
+        "--kcp-start",
+        action="store_true",
+        help="During --p2p-rendezvous, try sending command 20 over the recovered KCP channels",
+    )
+    probe.add_argument(
         "--insecure-skip-verify",
         action="store_true",
         help="Disable TLS certificate verification; native hosts may present mismatched certificates",
@@ -214,6 +219,8 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
         token=args.token,
         native_iot_host=args.native_iot_host,
     )
+    p2p_probe = None
+    p2p_rendezvous = None
     with XHomeLiveCloudTransport(
         metadata,
         timeout=args.timeout,
@@ -224,26 +231,27 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
         if args.send_start:
             frames.extend(transport.read_available(duration=min(2.0, args.duration)))
             transport.send_frame(metadata.start_command)
-        frames.extend(transport.read_available(duration=args.duration))
+        frames.extend(transport.read_available(duration=args.duration if not args.p2p_rendezvous else min(3.0, args.duration)))
+        if args.p2p_rendezvous and not extract_p2p_servers(frames):
+            frames.extend(transport.read_available(duration=args.duration))
+
+        p2p_servers = extract_p2p_servers(frames)
+        p2p_relays = unique_p2p_relays(p2p_servers)
+        if args.p2p_probe and p2p_servers:
+            first = p2p_servers[0]
+            p2p_probe = XHomeP2PProbe(
+                uid=args.uid,
+                relay_host=str(first["IP"]),
+                relay_port=int(first["Port"]),
+            ).run()
+        if args.p2p_rendezvous and p2p_relays:
+            p2p_rendezvous = XHomeP2PRendezvousProbe(
+                uid=args.uid,
+                relays=p2p_relays,
+            ).run(duration=args.duration, kcp_start_command=metadata.start_command if args.kcp_start else None)
+            frames.extend(transport.read_available(duration=min(1.0, args.timeout)))
         if args.send_start:
             transport.send_frame(metadata.stop_command)
-
-    p2p_probe = None
-    p2p_rendezvous = None
-    p2p_servers = extract_p2p_servers(frames)
-    p2p_relays = unique_p2p_relays(p2p_servers)
-    if args.p2p_probe and p2p_servers:
-        first = p2p_servers[0]
-        p2p_probe = XHomeP2PProbe(
-            uid=args.uid,
-            relay_host=str(first["IP"]),
-            relay_port=int(first["Port"]),
-        ).run()
-    if args.p2p_rendezvous and p2p_relays:
-        p2p_rendezvous = XHomeP2PRendezvousProbe(
-            uid=args.uid,
-            relays=p2p_relays,
-        ).run(duration=args.duration)
 
     return {
         "frames": [
@@ -254,7 +262,7 @@ def cmd_cloud_probe(args: argparse.Namespace) -> dict[str, Any]:
             }
             for frame in frames
         ],
-        "p2p_servers": p2p_servers,
+        "p2p_servers": extract_p2p_servers(frames),
         "p2p_probe": p2p_probe,
         "p2p_rendezvous": p2p_rendezvous,
     }

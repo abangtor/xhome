@@ -290,7 +290,7 @@ class LiveKcpTests(unittest.TestCase):
 
         self.assertEqual(conv_ids, [CONTROL_CONV_ID, MEDIA_CONV_ID])
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
-        self.assertEqual(packet.channel, 2)
+        self.assertEqual(packet.channel, 4)
         self.assertEqual(packet.payload, b"kcp:payloadLSV212PFJU5TQT42R3UX")
 
     def test_kcp_channels_route_inbound_media_packets(self):
@@ -303,13 +303,13 @@ class LiveKcpTests(unittest.TestCase):
         packet = decode_udp_packet(
             encode_kcp_udp_packet(
                 P2PPacketType.DIRECT_KCP_DATA,
-                b"frame",
-                channel=2,
+                MEDIA_CONV_ID.to_bytes(4, "little") + b"frame",
+                channel=4,
                 uid_suffix="LSV212PFJU5TQT42R3UX",
             )
         )
 
-        self.assertEqual(channels.receive_packet(packet), [(2, b"frame")])
+        self.assertEqual(channels.receive_packet(packet), [(2, MEDIA_CONV_ID.to_bytes(4, "little") + b"frame")])
 
     def test_strip_uid_suffix_only_when_present(self):
         self.assertEqual(strip_uid_suffix(b"abcLSV", "LSV"), b"abc")

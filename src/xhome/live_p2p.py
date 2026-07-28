@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
 
+from .live_transport import decode_native_frame_header, encode_native_frame
+
 UDP_HEADER = struct.Struct("<HHH")
 CLIENT_CONTROL_CHANNEL = 1
 MEDIA_CHANNEL = 2
-RAW_CHANNEL = 3
+RAW_CHANNEL = 4
 
 
 class P2PPacketType(IntEnum):
@@ -278,7 +280,14 @@ class XHomeP2PRendezvousProbe:
         self.relays = relays
         self.timeout = timeout
 
-    def run(self, *, duration: float = 8.0, interval: float = 0.05) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        duration: float = 8.0,
+        interval: float = 0.05,
+        kcp_start_command: int | None = None,
+        kcp_start_interval: float = 0.5,
+    ) -> dict[str, Any]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.bind(("0.0.0.0", 0))
@@ -302,7 +311,10 @@ class XHomeP2PRendezvousProbe:
                 "punch_response": 0,
                 "relay_info": 0,
                 "heartbeat": 0,
+                "kcp_start": 0,
             }
+            kcp_probe = KcpStartProbe(uid=self.uid, sock=sock, start_command=kcp_start_command)
+            next_kcp_start = 0.0
 
             for relay in self.relays:
                 sock.sendto(encode_udp_packet(P2PPacketType.RELAY_TOUCH), relay)
@@ -322,12 +334,18 @@ class XHomeP2PRendezvousProbe:
                         sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
                         sent_counts["direct_punch"] += 1
 
+                now = time.monotonic()
+                if kcp_start_command is not None and now >= next_kcp_start:
+                    sent_counts["kcp_start"] += kcp_probe.send_start_packets(candidates.values())
+                    next_kcp_start = now + kcp_start_interval
+
                 if selected_peer is not None:
                     sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), selected_peer)
                     sent_counts["heartbeat"] += 1
 
                 for received, addr in read_udp_available_with_addresses(sock, timeout=self.timeout):
                     packets.append(received)
+                    kcp_probe.receive_packet(received, addr)
                     if received.packet_type == P2PPacketType.CLIENT_CONNECT_RESPONSE and received.payload:
                         response = ClientConnectResponse.from_payload(received.payload)
                         response_key = json.dumps(response.raw, sort_keys=True)
@@ -359,12 +377,130 @@ class XHomeP2PRendezvousProbe:
                 "selected_peer": {"host": selected_peer[0], "port": selected_peer[1]} if selected_peer else None,
                 "candidates": [candidate.as_dict() for candidate in candidates.values()],
                 "client_connect_responses": [response.as_dict() for response in responses],
+                "kcp_start_probe": kcp_probe.as_dict(),
                 "packet_type_counts": packet_type_counts(packets),
                 "packets": [packet_summary(packet) for packet in packets[:10]],
                 "packets_truncated": max(0, len(packets) - 10),
             }
         finally:
             sock.close()
+
+
+class KcpStartProbe:
+    """Active probe that sends the native AV-start command over KCP.
+
+    Native ``IVIEWSClient::send`` wraps command bytes as the same 8-byte native
+    command frame used by the TLS control socket. ``P2P_manger::write`` then
+    sends ordinary device commands through KCP channel 2. This class tries that
+    shape against all discovered candidate paths.
+    """
+
+    def __init__(self, *, uid: str, sock: socket.socket, start_command: int | None) -> None:
+        self.uid = uid
+        self.sock = sock
+        self.start_command = start_command
+        self.error: str | None = None
+        self.paths: dict[tuple[str, int, int, str], Any] = {}
+        self.decoded_payloads: list[dict[str, Any]] = []
+
+    def send_start_packets(self, candidates: Any) -> int:
+        """Send one start frame through each initialized KCP path."""
+
+        if self.start_command is None:
+            return 0
+        if self.error:
+            return 0
+        sent = 0
+        payload = encode_native_frame(self.start_command)
+        for candidate in candidates:
+            try:
+                channels = self._channels_for_candidate(candidate)
+            except Exception as exc:  # noqa: BLE001
+                self.error = str(exc)
+                return sent
+            for channel in channels:
+                try:
+                    channel.send_media(payload)
+                    channel.update()
+                except Exception as exc:  # noqa: BLE001
+                    self.error = str(exc)
+                    return sent
+                sent += 1
+        return sent
+
+    def receive_packet(self, packet: UdpPacket, addr: tuple[str, int]) -> None:
+        """Feed inbound KCP packets to matching candidate paths."""
+
+        if self.error or self.start_command is None:
+            return
+        for channel in self.paths.values():
+            for kcp_channel, payload in channel.receive_packet(packet):
+                self.decoded_payloads.append(
+                    {
+                        "source": {"host": addr[0], "port": addr[1]},
+                        "kcp_channel": kcp_channel,
+                        **native_payload_summary(payload),
+                    }
+                )
+
+    def as_dict(self) -> dict[str, Any] | None:
+        if self.start_command is None:
+            return None
+        return {
+            "start_command": self.start_command,
+            "error": self.error,
+            "paths": [
+                {"host": host, "port": port, "packet_type": packet_type, "mode": mode}
+                for host, port, packet_type, mode in self.paths
+            ],
+            "decoded_payloads": self.decoded_payloads[:20],
+            "decoded_payloads_truncated": max(0, len(self.decoded_payloads) - 20),
+        }
+
+    def _channels_for_candidate(self, candidate: P2PAddress) -> list[Any]:
+        paths: list[Any] = []
+        if candidate.kind == P2PAddressKind.RELAY:
+            for packet_type in (P2PPacketType.DIRECT_KCP_DATA, P2PPacketType.RELAY_KCP_DATA):
+                paths.append(self._channel(candidate, int(packet_type), "relay"))
+            return paths
+        return [self._channel(candidate, int(P2PPacketType.KCP_DATA), "direct")]
+
+    def _channel(self, candidate: P2PAddress, packet_type: int, mode: str) -> Any:
+        key = (candidate.host, candidate.port, packet_type, mode)
+        if key not in self.paths:
+            from .live_kcp import XHomeKcpChannels
+
+            def send_udp(data: bytes, address: tuple[str, int] = candidate.address) -> None:
+                self.sock.sendto(data, address)
+
+            try:
+                self.paths[key] = XHomeKcpChannels(
+                    uid=self.uid,
+                    send_udp=send_udp,
+                    relay_tunnel=mode == "relay",
+                    outbound_packet_type=packet_type,
+                    uid_suffix=self.uid if mode == "relay" else None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.error = str(exc)
+                raise
+        return self.paths[key]
+
+
+def native_payload_summary(payload: bytes) -> dict[str, Any]:
+    """Summarize one decoded native command payload."""
+
+    summary: dict[str, Any] = {"payload_length": len(payload)}
+    if len(payload) >= 8:
+        command, payload_len = decode_native_frame_header(payload[:8])
+        summary["native_command"] = command
+        summary["native_payload_length"] = payload_len
+        body = payload[8 : 8 + payload_len]
+        if body:
+            summary["native_payload_text"] = body.decode("utf-8", errors="replace")
+    else:
+        summary["payload_text"] = payload.decode("utf-8", errors="replace")
+    return summary
 
 
 def read_udp_available(sock: socket.socket, *, timeout: float) -> list[UdpPacket]:

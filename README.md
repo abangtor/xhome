@@ -247,8 +247,10 @@ The repo now includes the first receive-only sidecar surface in
 TLS login phase and the first UDP relay probe. The implemented Python path can
 log in to `usaiotd.lancens.com:11201`, send command `20`, receive command `9`
 with P2P relay addresses, talk to the returned UDP relay, parse peer candidates,
-and run the native-shaped UDP rendezvous probe. KCP/media relay is still the
-remaining streaming layer. See `docs/XHOME_LIVE_SIDECAR.md`.
+and run the native-shaped UDP rendezvous probe. Add `--kcp-start` to actively
+send command `20` through the recovered KCP channel-2 path while the TLS live
+session remains open. Device-origin media relay is still the remaining streaming
+layer. See `docs/XHOME_LIVE_SIDECAR.md`.
 
 The KCP wrapper is included in the Python package, but the compiled KCP binding
 is optional and not installed by Home Assistant:

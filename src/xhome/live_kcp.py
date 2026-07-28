@@ -10,6 +10,7 @@ from .live_p2p import (
     CLIENT_CONTROL_CHANNEL,
     MEDIA_CHANNEL,
     P2PPacketType,
+    RAW_CHANNEL,
     UdpPacket,
     encode_kcp_udp_packet,
 )
@@ -78,7 +79,7 @@ class XHomeKcpChannel:
             encode_kcp_udp_packet(
                 self.packet_type,
                 kcp_payload,
-                channel=self.config.channel,
+                channel=RAW_CHANNEL,
                 uid_suffix=self.uid_suffix,
             )
         )
@@ -99,12 +100,22 @@ class XHomeKcpChannels:
         uid: str,
         send_udp: SendUdp,
         relay_tunnel: bool,
+        outbound_packet_type: int | None = None,
+        uid_suffix: str | None = None,
         kcp_factory: KcpFactory | None = None,
     ) -> None:
-        packet_type = P2PPacketType.DIRECT_KCP_DATA if relay_tunnel else P2PPacketType.KCP_DATA
-        uid_suffix = uid if relay_tunnel else None
+        packet_type = (
+            outbound_packet_type
+            if outbound_packet_type is not None
+            else P2PPacketType.DIRECT_KCP_DATA
+            if relay_tunnel
+            else P2PPacketType.KCP_DATA
+        )
+        uid_suffix = uid if uid_suffix is None and relay_tunnel else uid_suffix
         self.uid = uid
         self.relay_tunnel = relay_tunnel
+        self.outbound_packet_type = packet_type
+        self.uid_suffix = uid_suffix
         self.control = XHomeKcpChannel(
             config=CONTROL_CHANNEL_CONFIG,
             send_udp=send_udp,
@@ -140,9 +151,10 @@ class XHomeKcpChannels:
         }:
             return []
         payload = strip_uid_suffix(packet.payload, self.uid)
-        if packet.channel == self.control.config.channel:
+        conv_id = packet_conv_id(payload)
+        if conv_id == self.control.config.conv_id:
             return [(self.control.config.channel, item) for item in self.control.receive(payload)]
-        if packet.channel == self.media.config.channel:
+        if conv_id == self.media.config.conv_id:
             return [(self.media.config.channel, item) for item in self.media.receive(payload)]
         return []
 
@@ -160,6 +172,14 @@ def strip_uid_suffix(payload: bytes, uid: str) -> bytes:
     if payload.endswith(suffix):
         return payload[: -len(suffix)]
     return payload
+
+
+def packet_conv_id(payload: bytes) -> int | None:
+    """Return the little-endian KCP conversation id from one segment."""
+
+    if len(payload) < 4:
+        return None
+    return int.from_bytes(payload[:4], "little", signed=False)
 
 
 def default_kcp_factory(conv_id: int, _identity_token: Any) -> Any:

@@ -46,6 +46,10 @@ local/public/relay peer candidates, sends type-11 direct punch packets, sends
 type-15 relay-info packets, answers type-11 peer handshakes with type-12
 responses, and reports any type-13/18/19 KCP data packets it sees.
 
+Add `--kcp-start` to the rendezvous probe to actively send command `20` through
+the recovered KCP path. The native TLS session is kept open while UDP rendezvous
+runs; command `21` is sent only after the UDP/KCP probe exits.
+
 ```bash
 python -m xhome.live_sidecar cloud-probe \
   --uid LSV212PFJU5TQT42R3UX \
@@ -53,13 +57,17 @@ python -m xhome.live_sidecar cloud-probe \
   --native-iot-host usaiotd.lancens.com \
   --send-start \
   --p2p-rendezvous \
+  --kcp-start \
   --insecure-skip-verify
 ```
 
-The remaining implementation layer is KCP itself: native uses conversation
+Native KCP packets use UDP packet type `13`, `18`, or `19` with UDP envelope
+channel `4`. The KCP conversation id then identifies the logical channel:
 `0x11223344` for channel 1 and `0x11223345` for channel 2, with
-`nodelay(1, 10, 2, 1)`. Once that is wired, channel 2 should carry the 40-byte
-XHome media-header records that can be stripped to H.264/G.711/JPEG.
+`nodelay(1, 10, 2, 1)`. Normal app commands, including command `20`, are sent as
+the native 8-byte command frame over KCP channel 2. Once device-origin media is
+received, channel 2 should carry command-`8` records with the 40-byte XHome
+media header that can be stripped to H.264/G.711/JPEG.
 
 The sidecar includes a KCP channel wrapper for those recovered parameters. The
 compiled KCP dependency is intentionally optional and is not part of the Home
