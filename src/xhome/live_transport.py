@@ -131,6 +131,8 @@ class XHomeLiveCloudTransport:
                 sock.settimeout(min(self.timeout, remaining))
                 try:
                     frames.append(self.read_frame())
+                except EOFError:
+                    return frames
                 except TimeoutError:
                     return frames
                 except socket.timeout:

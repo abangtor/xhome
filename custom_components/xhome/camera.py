@@ -317,7 +317,8 @@ def _run_native_mjpeg_worker(
 
                 relays = _unique_p2p_relays(extract_p2p_servers(native_frames))
                 if not relays:
-                    raise RuntimeError("Native IoT session did not return any P2P relays")
+                    commands = [frame.command for frame in native_frames]
+                    raise RuntimeError(f"Native IoT session did not return any P2P relays; commands={commands}")
                 LOGGER.info("XHome native live stream using relays: %s", relays)
 
                 XHomeP2PRendezvousProbe(
@@ -330,7 +331,10 @@ def _run_native_mjpeg_worker(
                     stop_event=stop_event,
                 )
             finally:
-                transport.send_frame(metadata.stop_command)
+                try:
+                    transport.send_frame(metadata.stop_command)
+                except Exception as err:  # noqa: BLE001
+                    LOGGER.debug("XHome native live stop command failed: %s", err)
     except Exception as err:  # noqa: BLE001
         message = str(err)
         on_error(message)

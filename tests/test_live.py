@@ -44,6 +44,7 @@ from xhome.live_sidecar import (
 )
 from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
+    XHomeLiveCloudTransport,
     decode_native_frame_header,
     encode_native_frame,
     extract_p2p_servers,
@@ -334,6 +335,20 @@ class LiveTransportTests(unittest.TestCase):
 
         self.assertEqual(extract_p2p_servers(frames), [{"IP": "121.42.144.92", "Port": "9729"}])
 
+    def test_read_available_returns_frames_collected_before_eof(self):
+        metadata = live_session_from_token_payload(
+            uid="LSV",
+            native_iot_host="usaiotd.lancens.com",
+            payload={"token": "token"},
+        )
+        transport = XHomeLiveCloudTransport(metadata)
+        transport._socket = FakeSocket(encode_native_frame(9, b'[{"IP":"8.222.151.25","Port":"9729"}]'))
+
+        frames = transport.read_available(duration=1)
+
+        self.assertEqual([frame.command for frame in frames], [9])
+        self.assertEqual(extract_p2p_servers(frames), [{"IP": "8.222.151.25", "Port": "9729"}])
+
     def test_p2p_udp_packet_codec(self):
         data = encode_udp_packet(6, b"{}", channel=2)
         packet = decode_udp_packet(data)
@@ -490,6 +505,25 @@ class FakeKCP:
 
     def update(self, timestamp_ms=None):
         self.updated = True
+
+
+class FakeSocket:
+    def __init__(self, data: bytes) -> None:
+        self.data = bytearray(data)
+        self.timeout = None
+
+    def recv(self, size: int) -> bytes:
+        if not self.data:
+            return b""
+        chunk = self.data[:size]
+        del self.data[:size]
+        return bytes(chunk)
+
+    def gettimeout(self):
+        return self.timeout
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
 
 
 class LiveKcpTests(unittest.TestCase):
