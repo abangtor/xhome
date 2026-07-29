@@ -150,6 +150,14 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_p2p_last_payload_at": self._live_transport_stats.get("last_payload_at"),
                 "live_p2p_last_probe_frame_at": self._live_transport_stats.get("last_frame_at"),
                 "live_media_probe_error": self._live_transport_stats.get("error"),
+                "live_native_control_start_refreshes": self._live_transport_stats.get(
+                    "native_control_start_refreshes"
+                ),
+                "live_native_control_keepalives": self._live_transport_stats.get("native_control_keepalives"),
+                "live_native_control_frames": self._live_transport_stats.get("native_control_frames"),
+                "live_native_control_last_sent_at": self._live_transport_stats.get("native_control_last_sent_at"),
+                "live_native_control_last_read_at": self._live_transport_stats.get("native_control_last_read_at"),
+                "live_native_control_last_error": self._live_transport_stats.get("native_control_last_error"),
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
                 "live_last_error": self._live_last_error,
@@ -420,6 +428,7 @@ def _run_native_mjpeg_worker(
     try:
         with XHomeLiveCloudTransport(metadata, verify_tls=False) as transport:
             try:
+                native_control = _NativeLiveControlKeeper(transport, metadata)
                 transport.login()
                 native_frames = transport.read_available(duration=1.0)
                 transport.send_frame(metadata.start_command)
@@ -433,14 +442,23 @@ def _run_native_mjpeg_worker(
                     raise RuntimeError(f"Native IoT session did not return any P2P relays; commands={commands}")
                 LOGGER.info("XHome native live stream using relays: %s", relays)
 
+                def on_native_frame(frame: LiveAppMediaFrame) -> None:
+                    native_control.refresh_after_first_frame()
+                    on_frame(frame)
+
+                def on_native_stats(stats: dict[str, Any]) -> None:
+                    native_control.tick()
+                    stats.update(native_control.as_dict())
+                    on_stats(stats)
+
                 XHomeP2PRendezvousProbe(
                     uid=metadata.uid,
                     relays=relays,
                     direct_punch_enabled=True,
                 ).run(
                     duration=MJPEG_STREAM_DURATION,
-                    on_frame=on_frame,
-                    on_stats=on_stats,
+                    on_frame=on_native_frame,
+                    on_stats=on_native_stats,
                     stop_event=stop_event,
                 )
             finally:
@@ -454,6 +472,75 @@ def _run_native_mjpeg_worker(
         LOGGER.warning("XHome native live stream stopped: %s", message)
     finally:
         stop_event.set()
+
+
+class _NativeLiveControlKeeper:
+    """Keep the native IoT control channel active while UDP media is flowing."""
+
+    def __init__(self, transport: XHomeLiveCloudTransport, metadata: LiveSessionMetadata) -> None:
+        self._transport = transport
+        self._metadata = metadata
+        self._first_frame_refresh_sent = False
+        self._next_keepalive = time.monotonic() + 60.0
+        self._start_refreshes = 0
+        self._keepalives = 0
+        self._frames = 0
+        self._last_sent_at: int | None = None
+        self._last_read_at: int | None = None
+        self._last_error: str | None = None
+
+    def refresh_after_first_frame(self) -> None:
+        """Mirror the native app's post-media-start control traffic."""
+
+        if self._first_frame_refresh_sent:
+            return
+        self._first_frame_refresh_sent = True
+        self._send_start_refresh()
+
+    def tick(self) -> None:
+        """Read pending control responses and periodically refresh AV start."""
+
+        self._read_pending()
+        now = time.monotonic()
+        if now < self._next_keepalive:
+            return
+        self._send_start_refresh(keepalive=True)
+        self._next_keepalive = now + 60.0
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return compact diagnostics for camera attributes."""
+
+        return {
+            "native_control_start_refreshes": self._start_refreshes,
+            "native_control_keepalives": self._keepalives,
+            "native_control_frames": self._frames,
+            "native_control_last_sent_at": self._last_sent_at,
+            "native_control_last_read_at": self._last_read_at,
+            "native_control_last_error": self._last_error,
+        }
+
+    def _send_start_refresh(self, *, keepalive: bool = False) -> None:
+        try:
+            self._transport.send_frame(self._metadata.start_command)
+        except Exception as err:  # noqa: BLE001
+            self._last_error = str(err)
+            return
+        self._start_refreshes += 1
+        if keepalive:
+            self._keepalives += 1
+        self._last_sent_at = int(time.time())
+        self._read_pending()
+
+    def _read_pending(self) -> None:
+        try:
+            frames = self._transport.read_available(duration=0.05)
+        except Exception as err:  # noqa: BLE001
+            self._last_error = str(err)
+            return
+        if not frames:
+            return
+        self._frames += len(frames)
+        self._last_read_at = int(time.time())
 
 
 def _unique_p2p_relays(servers: list[dict[str, Any]]) -> list[tuple[str, int]]:
