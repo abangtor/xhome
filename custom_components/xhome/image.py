@@ -265,3 +265,21 @@ def _insert_jpeg_exif_orientation(image_bytes: bytes, orientation: int) -> bytes
     payload = JPEG_EXIF_PREFIX + tiff
     segment = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
     return image_bytes[:2] + segment + image_bytes[2:]
+
+
+def is_decodable_jpeg(image_bytes: bytes) -> bool:
+    """Return whether Pillow can fully decode a JPEG without recovery mode."""
+
+    if not image_bytes.startswith(JPEG_SOI):
+        return False
+    try:
+        from PIL import Image
+    except ImportError:
+        return True
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+    except Exception:  # noqa: BLE001
+        return False
+    return True

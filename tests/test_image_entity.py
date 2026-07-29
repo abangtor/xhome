@@ -126,6 +126,9 @@ class ImageEntityTests(unittest.TestCase):
         self.assertIn(b"Exif\x00\x00", updated)
         self.assertIn(b"\x01\x12\x00\x03\x00\x00\x00\x01\x00\x08\x00\x00", updated)
 
+    def test_is_decodable_jpeg_rejects_non_jpeg(self):
+        self.assertFalse(image.is_decodable_jpeg(b"not a jpeg"))
+
 
 if __name__ == "__main__":
     unittest.main()

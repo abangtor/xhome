@@ -25,7 +25,7 @@ from .const import CONF_LIVE_STREAM_URL_TEMPLATE, DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
 from .helpers import redact_uid
-from .image import image_rotation_degrees, rotate_image_bytes, set_jpeg_exif_orientation
+from .image import image_rotation_degrees, is_decodable_jpeg, rotate_image_bytes, set_jpeg_exif_orientation
 
 LOGGER = logging.getLogger(__name__)
 DATA_LIVE_CAMERAS = f"{DOMAIN}_live_cameras"
@@ -79,6 +79,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_frames = 0
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
+        self._live_invalid_jpeg_frames = 0
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
@@ -116,6 +117,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_frames": self._live_frames,
                 "live_rotated_frames": self._live_rotated_frames,
                 "live_rotation_failures": self._live_rotation_failures,
+                "live_invalid_jpeg_frames": self._live_invalid_jpeg_frames,
                 "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
                 "live_app_packets": self._live_transport_stats.get("app_packets"),
                 "live_p2p_frames": self._live_transport_stats.get("frames"),
@@ -163,6 +165,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_frames = 0
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
+        self._live_invalid_jpeg_frames = 0
         self._live_last_started_at = int(time.time())
         self._live_last_frame_at = None
         self._live_last_error = None
@@ -259,7 +262,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
         rotation = self._image_rotation()
         if rotation == 0:
+            if not is_decodable_jpeg(image):
+                self._live_invalid_jpeg_frames += 1
+                return None
             return image
+        if not is_decodable_jpeg(image):
+            self._live_invalid_jpeg_frames += 1
+            return None
         rotated = set_jpeg_exif_orientation(image, rotation)
         if rotated == image:
             self._live_rotation_failures += 1
