@@ -25,6 +25,7 @@ from xhome.live_p2p import (
     P2PAddressKind,
     P2PPacketType,
     RAW_CHANNEL,
+    UNRELIABLE_MEDIA_CHANNEL,
     build_client_connect_payload,
     build_direct_touch_payload,
     build_peer_punch_payload,
@@ -740,6 +741,27 @@ class LiveTransportTests(unittest.TestCase):
         self.assertIsNotNone(probe.last_direct_touch_echo_at)
         self.assertEqual(probe.kcp_payloads, 0)
 
+    def test_kcp_media_probe_counts_unreliable_g711_media(self):
+        probe = KcpMediaProbe(uid="LSV212PFJU5TQT42R3UX", sock=FakeSendUdpSocket())
+        addr = ("192.168.7.178", 16904)
+        media_header = bytearray(40)
+        media_header[3] = MediaType.G711_AUDIO
+        media_payload = bytes(media_header) + (b"\x00" * 960)
+        wrapped_payload = b"\x08\x00\xa5\xa5" + len(media_payload).to_bytes(4, "little") + media_payload
+
+        probe.receive_packet(
+            decode_udp_packet(
+                encode_udp_packet(P2PPacketType.KCP_DATA, wrapped_payload, channel=UNRELIABLE_MEDIA_CHANNEL)
+            ),
+            addr,
+        )
+
+        self.assertEqual(probe.unreliable_media_packets, 1)
+        self.assertEqual(probe.unreliable_media_frames, 1)
+        self.assertEqual(probe.unreliable_g711_frames, 1)
+        self.assertEqual(probe.unreliable_media_parse_errors, 0)
+        self.assertEqual(probe.kcp_payloads, 0)
+
 
 class FakeKCP:
     def __init__(self, conv_id, identity_token):
@@ -872,6 +894,27 @@ class LiveKcpTests(unittest.TestCase):
     def test_strip_uid_suffix_only_when_present(self):
         self.assertEqual(strip_uid_suffix(b"abcLSV", "LSV"), b"abc")
         self.assertEqual(strip_uid_suffix(b"abc", "LSV"), b"abc")
+
+    def test_minimal_kcp_answers_window_probe_requests(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+        wask = (
+            MEDIA_CONV_ID.to_bytes(4, "little")
+            + bytes([MinimalKCP.WASK, 0])
+            + (32).to_bytes(2, "little")
+            + (123).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+        )
+
+        kcp.receive(wask)
+
+        self.assertEqual(kcp.window_probe_requests, 1)
+        self.assertEqual(kcp.window_probe_responses, 1)
+        self.assertEqual(sent[0][4], MinimalKCP.WINS)
+        self.assertEqual(int.from_bytes(sent[0][6:8], "little"), MinimalKCP.RECEIVE_WINDOW)
 
 
 def xhome_udp_kcp_datagram(

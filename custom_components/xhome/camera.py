@@ -144,6 +144,12 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
                 "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
                 "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
+                "live_p2p_kcp_window_probe_requests": self._live_transport_stats.get(
+                    "kcp_window_probe_requests"
+                ),
+                "live_p2p_kcp_window_probe_responses": self._live_transport_stats.get(
+                    "kcp_window_probe_responses"
+                ),
                 "live_p2p_raw_kcp_prefixes": self._live_transport_stats.get("raw_kcp_prefixes"),
                 "live_p2p_raw_channel_kcp_segments": self._live_transport_stats.get("raw_channel_kcp_segments"),
                 "live_p2p_raw_channel_kcp_default_prefixes": self._live_transport_stats.get(
@@ -158,6 +164,17 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_p2p_direct_touch_echoes": self._live_transport_stats.get("direct_touch_echoes"),
                 "live_p2p_last_direct_touch_echo_at": self._live_transport_stats.get(
                     "last_direct_touch_echo_at"
+                ),
+                "live_p2p_unreliable_media_packets": self._live_transport_stats.get(
+                    "unreliable_media_packets"
+                ),
+                "live_p2p_unreliable_media_frames": self._live_transport_stats.get("unreliable_media_frames"),
+                "live_p2p_unreliable_g711_frames": self._live_transport_stats.get("unreliable_g711_frames"),
+                "live_p2p_unreliable_media_parse_errors": self._live_transport_stats.get(
+                    "unreliable_media_parse_errors"
+                ),
+                "live_p2p_last_unreliable_media_at": self._live_transport_stats.get(
+                    "last_unreliable_media_at"
                 ),
                 "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
                 "live_app_packets": self._live_transport_stats.get("app_packets"),

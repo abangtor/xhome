@@ -12,14 +12,17 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 
-from .live import LiveAppMediaAssembler, LiveAppMediaFrame, MediaType, parse_live_app_media_packet
+from .live import LiveAppMediaAssembler, LiveAppMediaFrame, MediaType, parse_live_app_media_packet, parse_media_frame
 from .live_transport import decode_native_frame_header, encode_native_frame
 
 UDP_HEADER = struct.Struct("<HHH")
 CLIENT_CONTROL_CHANNEL = 1
 MEDIA_CHANNEL = 2
+UNRELIABLE_MEDIA_CHANNEL = 3
 RAW_CHANNEL = 4
 SPLIT_MEDIA_KCP_PREFIX = b"\x45\x33\x22\x11\x51\x00\x20\x00"
+UNRELIABLE_MEDIA_MAGIC = b"\x08\x00\xa5\xa5"
+UNRELIABLE_MEDIA_WRAPPER_BYTES = 8
 
 
 class P2PPacketType(IntEnum):
@@ -758,6 +761,11 @@ class KcpMediaProbe:
         self.raw_channel_kcp_invalid_segments = 0
         self.direct_touch_echoes = 0
         self.last_direct_touch_echo_at: int | None = None
+        self.unreliable_media_packets = 0
+        self.unreliable_media_frames = 0
+        self.unreliable_g711_frames = 0
+        self.unreliable_media_parse_errors = 0
+        self.last_unreliable_media_at: int | None = None
         self._raw_kcp_prefix_by_path: dict[tuple[str, int, int], bytes] = {}
         self._last_stats_frame_count = -1
         self._last_stats_payload_bucket = -1
@@ -781,6 +789,9 @@ class KcpMediaProbe:
             P2PPacketType.DIRECT_KCP_DATA,
             P2PPacketType.RELAY_KCP_DATA,
         }:
+            return
+        if packet.channel == UNRELIABLE_MEDIA_CHANNEL:
+            self._handle_unreliable_media_payload(packet.payload, now)
             return
         self.last_kcp_packet_at = now
         if packet.channel == RAW_CHANNEL and len(packet.payload) == 8:
@@ -838,14 +849,17 @@ class KcpMediaProbe:
             channel.update()
 
     def as_dict(self) -> dict[str, Any]:
+        ack_stats = [channel.ack_stats() for channel in self.paths.values()]
         return {
             "error": self.error,
             "paths": [
                 {"host": host, "port": port, "packet_type": packet_type, "mode": mode}
                 for host, port, packet_type, mode in self.paths
             ],
-            "kcp_ack_datagrams": sum(channel.ack_stats()["datagrams"] for channel in self.paths.values()),
-            "kcp_ack_segments": sum(channel.ack_stats()["segments"] for channel in self.paths.values()),
+            "kcp_ack_datagrams": sum(stats["datagrams"] for stats in ack_stats),
+            "kcp_ack_segments": sum(stats["segments"] for stats in ack_stats),
+            "kcp_window_probe_requests": sum(stats["window_probe_requests"] for stats in ack_stats),
+            "kcp_window_probe_responses": sum(stats["window_probe_responses"] for stats in ack_stats),
             "raw_kcp_prefixes": self.raw_kcp_prefixes,
             "raw_channel_kcp_segments": self.raw_channel_kcp_segments,
             "raw_channel_kcp_default_prefixes": self.raw_channel_kcp_default_prefixes,
@@ -853,6 +867,11 @@ class KcpMediaProbe:
             "raw_channel_kcp_invalid_segments": self.raw_channel_kcp_invalid_segments,
             "direct_touch_echoes": self.direct_touch_echoes,
             "last_direct_touch_echo_at": self.last_direct_touch_echo_at,
+            "unreliable_media_packets": self.unreliable_media_packets,
+            "unreliable_media_frames": self.unreliable_media_frames,
+            "unreliable_g711_frames": self.unreliable_g711_frames,
+            "unreliable_media_parse_errors": self.unreliable_media_parse_errors,
+            "last_unreliable_media_at": self.last_unreliable_media_at,
             "udp_packets": self.udp_packets,
             "kcp_payloads": self.kcp_payloads,
             "app_packets": self.app_packets,
@@ -921,6 +940,32 @@ class KcpMediaProbe:
             self.jpeg_frames += 1
             if self.jpeg_dir is not None:
                 (self.jpeg_dir / f"frame-{self.jpeg_frames:06d}.jpg").write_bytes(frame.payload)
+        self._emit_stats()
+
+    def _handle_unreliable_media_payload(self, payload: bytes, now: int) -> None:
+        """Count native channel-3 unreliable media packets."""
+
+        self.unreliable_media_packets += 1
+        self.last_unreliable_media_at = now
+        if len(payload) < UNRELIABLE_MEDIA_WRAPPER_BYTES or payload[:4] != UNRELIABLE_MEDIA_MAGIC:
+            self.unreliable_media_parse_errors += 1
+            self._emit_stats(force=True)
+            return
+        declared_length = int.from_bytes(payload[4:8], "little", signed=False)
+        media_payload = payload[UNRELIABLE_MEDIA_WRAPPER_BYTES:]
+        if declared_length > len(media_payload):
+            self.unreliable_media_parse_errors += 1
+            self._emit_stats(force=True)
+            return
+        try:
+            frame = parse_media_frame(media_payload[:declared_length])
+        except ValueError:
+            self.unreliable_media_parse_errors += 1
+            self._emit_stats(force=True)
+            return
+        self.unreliable_media_frames += 1
+        if frame.media_type == MediaType.G711_AUDIO:
+            self.unreliable_g711_frames += 1
         self._emit_stats()
 
     def _emit_stats(self, *, force: bool = False) -> None:

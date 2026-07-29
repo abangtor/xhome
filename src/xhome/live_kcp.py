@@ -84,6 +84,16 @@ class XHomeKcpChannel:
 
         self.kcp.update(timestamp_ms)
 
+    def stats(self) -> dict[str, int]:
+        """Return transport counters for this KCP channel."""
+
+        return {
+            "datagrams": self.outbound_datagrams,
+            "ack_segments": self.outbound_ack_segments,
+            "window_probe_requests": int(getattr(self.kcp, "window_probe_requests", 0)),
+            "window_probe_responses": int(getattr(self.kcp, "window_probe_responses", 0)),
+        }
+
     def _send_kcp(self, _kcp: Any, kcp_payload: bytes) -> None:
         self.outbound_datagrams += 1
         self.outbound_ack_segments += count_ack_segments(kcp_payload)
@@ -179,11 +189,18 @@ class XHomeKcpChannels:
     def ack_stats(self) -> dict[str, int]:
         """Return outbound ACK counters for diagnostics."""
 
+        control_stats = self.control.stats()
+        media_stats = self.media.stats()
         return {
-            "datagrams": self.control.outbound_datagrams + self.media.outbound_datagrams,
-            "segments": self.control.outbound_ack_segments + self.media.outbound_ack_segments,
+            "datagrams": control_stats["datagrams"] + media_stats["datagrams"],
+            "segments": control_stats["ack_segments"] + media_stats["ack_segments"],
+            "window_probe_requests": (
+                control_stats["window_probe_requests"] + media_stats["window_probe_requests"]
+            ),
+            "window_probe_responses": (
+                control_stats["window_probe_responses"] + media_stats["window_probe_responses"]
+            ),
         }
-
 
 def strip_uid_suffix(payload: bytes, uid: str) -> bytes:
     """Remove the native relay-mode UID suffix when present."""
@@ -235,6 +252,8 @@ class MinimalKCP:
 
     PUSH = 81
     ACK = 82
+    WASK = 83
+    WINS = 84
     HEADER_BYTES = 24
     RECEIVE_WINDOW = 32
     MTU_BYTES = 1400
@@ -251,6 +270,8 @@ class MinimalKCP:
         self.ack_batch_size = 3
         self.ack_max_datagram_bytes = self.MTU_BYTES
         self.ack_flush_interval = 0.01
+        self.window_probe_requests = 0
+        self.window_probe_responses = 0
 
     def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
         """Register a callback for outbound KCP segments."""
@@ -284,6 +305,9 @@ class MinimalKCP:
             if command == self.PUSH:
                 self._queue_received(sequence, data[body_start:body_end])
                 self._queue_ack(KcpAck(timestamp=timestamp, sequence=sequence))
+            elif command == self.WASK:
+                self.window_probe_requests += 1
+                self._send_window_probe_response()
             offset = body_end
 
     def get_all_received(self) -> list[bytes]:
@@ -341,6 +365,12 @@ class MinimalKCP:
     def _send(self, segment: bytes) -> None:
         if self._outbound_handler is not None:
             self._outbound_handler(self, segment)
+
+    def _send_window_probe_response(self) -> None:
+        """Answer a native KCP window-size probe."""
+
+        self.window_probe_responses += 1
+        self._send(self._encode_segment(self.WINS, sequence=0, una=self._expected_receive_sequence or 0))
 
     def _queue_ack(self, ack: KcpAck) -> None:
         if self._pending_acks and self._pending_ack_bytes() + self.HEADER_BYTES > self.ack_max_datagram_bytes:
