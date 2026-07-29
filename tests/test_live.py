@@ -463,6 +463,19 @@ class LiveTransportTests(unittest.TestCase):
         self.assertIsInstance(punch_response["Time"], int)
         self.assertEqual(relay_info, {"Uid": "LSV", "Key": ""})
 
+    def test_p2p_json_payloads_match_native_whitespace(self):
+        uid = "LSV212PFJU5TQT42R3UX"
+
+        self.assertEqual(build_uid_payload(uid=uid), b'{\n\t"Uid":\t"LSV212PFJU5TQT42R3UX"\n}')
+        self.assertEqual(
+            build_uid_payload(uid=uid, include_key=True),
+            b'{\n\t"Uid":\t"LSV212PFJU5TQT42R3UX",\n\t"Key":\t""\n}',
+        )
+        self.assertEqual(
+            build_peer_punch_payload(uid=uid, address_kind=P2PAddressKind.PUBLIC),
+            b'{\n\t"Uid":\t"LSV212PFJU5TQT42R3UX",\n\t"Key":\t"",\n\t"Type":\t"1"\n}',
+        )
+
     def test_relay_touch_payload_appends_uid_to_eight_byte_nonce(self):
         payload = build_relay_touch_payload(uid="LSV212PFJU5TQT42R3UX", nonce=b"12345678")
 

@@ -152,9 +152,9 @@ def decode_udp_packet(data: bytes) -> UdpPacket:
 
 
 def build_json_payload(payload: dict[str, Any]) -> bytes:
-    """Encode compact JSON for P2P control packets."""
+    """Encode native-style JSON for P2P control packets."""
 
-    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return json.dumps(payload, indent="\t", separators=(",", ":\t"), ensure_ascii=False).encode("utf-8")
 
 
 def build_client_connect_payload(*, uid: str, local_ip: str, local_port: int, key: str | None = None) -> bytes:
