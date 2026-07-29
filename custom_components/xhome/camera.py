@@ -77,6 +77,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._stream_token = secrets.token_urlsafe(24)
         self._live_streams_started = 0
         self._live_frames = 0
+        self._live_rotated_frames = 0
+        self._live_rotation_failures = 0
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
@@ -108,8 +110,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "native_media_header_bytes": 40,
                 "video_codec": "mjpeg",
                 "audio_codec": "g711",
+                "image_rotation": self._image_rotation(),
                 "live_streams_started": self._live_streams_started,
                 "live_frames": self._live_frames,
+                "live_rotated_frames": self._live_rotated_frames,
+                "live_rotation_failures": self._live_rotation_failures,
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
                 "live_last_error": self._live_last_error,
@@ -217,11 +222,24 @@ class XHomeLiveCamera(XHomeEntity, Camera):
     def _rotate_jpeg(self, image: bytes) -> bytes:
         """Apply the configured camera image rotation to JPEG bytes."""
 
-        return rotate_image_bytes(
+        rotation = self._image_rotation()
+        if rotation == 0:
+            return image
+        rotated = rotate_image_bytes(
             image,
-            image_rotation_degrees(self.coordinator.config_entry.options),
+            rotation,
             self._attr_content_type,
         )
+        if rotated == image:
+            self._live_rotation_failures += 1
+        else:
+            self._live_rotated_frames += 1
+        return rotated
+
+    def _image_rotation(self) -> int:
+        """Return the configured camera image rotation."""
+
+        return image_rotation_degrees(self.coordinator.config_entry.options)
 
     def _handle_live_error(self, message: str) -> None:
         """Store one native live stream error for diagnostics."""
