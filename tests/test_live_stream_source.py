@@ -33,6 +33,8 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("image_rotation_degrees", camera_source)
         self.assertIn("rotate_image_bytes", camera_source)
         self.assertIn("def _rotate_jpeg", camera_source)
+        self.assertIn("def _rotate_stream_jpeg", camera_source)
+        self.assertIn("if frame is None:", camera_source)
         self.assertIn('"image_rotation": self._image_rotation()', camera_source)
         self.assertIn('"live_rotated_frames": self._live_rotated_frames', camera_source)
         self.assertIn('"live_rotation_failures": self._live_rotation_failures', camera_source)

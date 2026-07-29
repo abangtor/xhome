@@ -197,7 +197,9 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     if not thread.is_alive():
                         break
                     continue
-                frame = self._rotate_jpeg(frame)
+                frame = self._rotate_stream_jpeg(frame)
+                if frame is None:
+                    continue
                 await response.write(
                     b"--"
                     + MJPEG_BOUNDARY
@@ -250,6 +252,23 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             self._live_rotation_failures += 1
         else:
             self._live_rotated_frames += 1
+        return rotated
+
+    def _rotate_stream_jpeg(self, image: bytes) -> bytes | None:
+        """Apply rotation for the MJPEG stream, skipping failed rotated frames."""
+
+        rotation = self._image_rotation()
+        if rotation == 0:
+            return image
+        rotated = rotate_image_bytes(
+            image,
+            rotation,
+            self._attr_content_type,
+        )
+        if rotated == image:
+            self._live_rotation_failures += 1
+            return None
+        self._live_rotated_frames += 1
         return rotated
 
     def _image_rotation(self) -> int:
