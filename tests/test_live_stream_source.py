@@ -23,14 +23,22 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("Platform.CAMERA", const_source)
         self.assertIn("camera", hacs["domains"])
 
-    def test_live_camera_uses_external_stream_template_without_token_attribute(self):
+    def test_live_camera_uses_embedded_mjpeg_stream_without_token_attribute(self):
         camera_source = CAMERA_PATH.read_text()
 
         self.assertIn("class XHomeLiveCamera", camera_source)
+        self.assertIn("async def handle_async_mjpeg_stream", camera_source)
         self.assertIn("async def stream_source", camera_source)
         self.assertIn("render_live_stream_url", camera_source)
-        self.assertIn('"native_transport": "IVIEWSAVAPIs"', camera_source)
+        self.assertIn('"embedded_live_stream": True', camera_source)
+        self.assertIn('"native_transport": "portable_p2p"', camera_source)
+        self.assertIn("XHomeP2PRendezvousProbe", camera_source)
         self.assertNotIn('"token"', camera_source)
+
+    def test_home_assistant_manifest_installs_kcp_for_embedded_live_stream(self):
+        manifest = json.loads((ROOT / "custom_components" / "xhome" / "manifest.json").read_text())
+
+        self.assertIn("kcp>=0.1.6", manifest["requirements"])
 
     def test_prepare_live_stream_fetches_native_token_metadata(self):
         coordinator_source = COORDINATOR_PATH.read_text()

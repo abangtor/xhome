@@ -122,10 +122,12 @@ KCP conversation id `0x11223345`, KCP push command `81`, then command-`8`
 app-media fragments. The observed live-view window yielded JPEG frames
 (`media_type=165`), not H.264.
 
-## MJPEG Debug Server
+## Standalone MJPEG Debug Server
 
-For the current receive path, the practical stream surface is MJPEG because the
-device has been publishing assembled JPEG frames. Start a temporary sidecar URL:
+The Home Assistant custom component now embeds the portable native live path and
+serves the `Live camera` entity directly. This standalone command is still
+useful for debugging because the device has been publishing assembled JPEG
+frames:
 
 ```bash
 python -m xhome.live_sidecar mjpeg-server \
@@ -138,8 +140,8 @@ python -m xhome.live_sidecar mjpeg-server \
   --insecure-skip-verify
 ```
 
-Then configure the Home Assistant XHome option `Live stream URL template` to a
-URL such as:
+For experiments, the Home Assistant XHome option `Live stream URL template` can
+still point to this temporary URL:
 
 ```text
 http://SIDECAR_HOST:8088/xhome.mjpeg

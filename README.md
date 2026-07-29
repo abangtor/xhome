@@ -9,11 +9,12 @@ This repository now contains the first Home Assistant project skeleton and the
 reverse-engineered REST API wrapper. The API client has offline tests; the Home
 Assistant integration has an initial config flow, coordinator, lock entity,
 sensors, binary sensors, writable setting entities, latest event image entity,
-diagnostics, API helper services, and a refresh service.
+embedded MJPEG live camera, diagnostics, API helper services, and a refresh
+service.
 
 The first supported path will be normal username/password auth only. Google,
-WeChat, native P2P video/control, BLE provisioning, and native temporary
-password generation are out of scope for the first Home Assistant version.
+WeChat, BLE provisioning, and native temporary password generation are out of
+scope for the first Home Assistant version.
 
 ## Goal
 
@@ -26,7 +27,7 @@ Expose XHome door devices cleanly in Home Assistant:
 - Latest event image through a native Home Assistant image entity
 - Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
-- Live camera entity surface for an external native P2P/go2rtc bridge
+- Embedded live camera entity using the native XHome P2P JPEG stream
 - Optional direct local push listener for near-real-time XHome events
 
 ## Planned Structure
@@ -57,7 +58,7 @@ This repository can be installed as a HACS custom repository.
 6. Restart Home Assistant.
 7. Add the integration from **Settings** -> **Devices & services** -> **Add integration** -> **XHome**.
 
-The integration vendors its XHome REST API client under
+The integration vendors its XHome REST and native live-stream client under
 `custom_components/xhome/api`, so a HACS install does not need a separate
 `pip install -e .` step.
 
@@ -102,14 +103,15 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 The integration should stay thin. Home Assistant code should handle config
 entries, entities, polling, diagnostics, and services. For HACS installation,
-the runtime API client is vendored under `custom_components/xhome/api`. The
-standalone `src/xhome` package remains useful for CLI work, tests, and a future
-published package if we decide to split it later.
+the runtime API and native live-stream client are vendored under
+`custom_components/xhome/api`. The standalone `src/xhome` package remains useful
+for CLI work, tests, and a future published package if we decide to split it
+later.
 
 The first Home Assistant integration should use `DataUpdateCoordinator` and call
-the synchronous API client through Home Assistant executor jobs. A sidecar or
-MQTT bridge is only worth adding later if native P2P, live video, BLE, or
-temporary-password support becomes necessary.
+the synchronous API client through Home Assistant executor jobs. The embedded
+live camera uses the recovered native IoT/P2P transport directly; the standalone
+sidecar CLI remains a debugging and packet-analysis tool.
 
 ## Security
 
@@ -222,12 +224,18 @@ Live viewing and active recording use the app's native P2P stack.
 ## Live streaming
 
 The integration now exposes a per-device `Live camera` entity as the Home
-Assistant-side surface for a future/native XHome P2P bridge. XHome live video is
-not a direct REST/HLS/RTSP URL; the Android app uses `libIVIEWSAVAPIs.so` to
-obtain H.264/G.711 frames and then decodes them locally.
+Assistant-side surface for the native XHome P2P JPEG stream. XHome live video is
+not a direct REST/HLS/RTSP URL; the official app logs in to the native IoT
+service, discovers UDP peers through the XHome relay, then receives JPEG media
+over KCP from the door.
 
-Set the integration option `Live stream URL template` to the stream URL produced
-by an external bridge or go2rtc, for example:
+No separate addon is required for the normal Home Assistant camera entity. When
+Home Assistant opens the `Live camera`, the integration fetches a fresh live
+token, starts the native rendezvous worker in-process, and serves the received
+JPEG frames as MJPEG.
+
+The option `Live stream URL template` remains as an escape hatch for experiments
+with an external bridge or go2rtc, for example:
 
 ```text
 rtsp://homeassistant.local:8554/xhome/{uid_tail}
@@ -242,22 +250,12 @@ command `20`, stop command `21`, codec names, and the 40-byte media header size
 needed by a sidecar. Treat that response like a secret; the live token is
 credential material.
 
-The repo now includes the first receive-only sidecar surface in
-`xhome.live_sidecar`, plus a portable Python reimplementation of the native IoT
-TLS login phase and the first UDP relay probe. The implemented Python path can
-log in to `usaiotd.lancens.com:11201`, send command `20`, receive command `9`
-with P2P relay addresses, talk to the returned UDP relay, parse peer candidates,
-and run the native-shaped UDP rendezvous probe. Add `--kcp-start` to actively
-send command `20` through the recovered KCP channel-2 path while the TLS live
-session remains open. Device-origin media relay is still the remaining streaming
-layer. See `docs/XHOME_LIVE_SIDECAR.md`.
+The repo also includes standalone debugging tools in `xhome.live_sidecar` for
+cloud probes, PCAP extraction, and temporary MJPEG serving outside Home
+Assistant. See `docs/XHOME_LIVE_SIDECAR.md`.
 
-The KCP wrapper is included in the Python package, but the compiled KCP binding
-is optional and not installed by Home Assistant:
-
-```bash
-pip install "xhome-api[live]"
-```
+The Home Assistant custom component installs `kcp>=0.1.6` because the embedded
+camera needs to ACK and reassemble the native KCP media stream.
 
 ## Development Roadmap
 
