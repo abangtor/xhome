@@ -609,6 +609,32 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual([sent[0][4], sent[0][28]], [MinimalKCP.ACK, MinimalKCP.ACK])
         self.assertEqual([int.from_bytes(sent[0][12:16], "little"), int.from_bytes(sent[0][36:40], "little")], [1, 2])
 
+    def test_minimal_kcp_packs_ack_batches_to_native_mtu(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.ack_flush_interval = 0
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+
+        for sequence in range(60):
+            kcp.receive(minimal_kcp_push(sequence=sequence, payload=b"x"))
+        kcp.update()
+
+        self.assertEqual([len(payload) for payload in sent], [1392, 48])
+        self.assertEqual(sum(len(payload) // MinimalKCP.HEADER_BYTES for payload in sent), 60)
+        self.assertEqual([payload[4] for payload in sent], [MinimalKCP.ACK, MinimalKCP.ACK])
+
+    def test_minimal_kcp_ack_window_reflects_queued_receive_payloads(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.ack_flush_interval = 0
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+
+        kcp.receive(minimal_kcp_push(sequence=1, timestamp=100, payload=b"one"))
+        kcp.receive(minimal_kcp_push(sequence=2, timestamp=200, payload=b"two"))
+        kcp.update()
+
+        self.assertEqual(int.from_bytes(sent[0][6:8], "little"), 30)
+
     def test_unique_p2p_relays_dedupes_command_9_servers(self):
         relays = unique_p2p_relays(
             [

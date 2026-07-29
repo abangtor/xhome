@@ -34,6 +34,15 @@ class KcpChannelConfig:
     conv_id: int
 
 
+@dataclass(frozen=True)
+class KcpAck:
+    """One pending KCP ACK entry."""
+
+    timestamp: int
+    sequence: int
+    una: int
+
+
 CONTROL_CHANNEL_CONFIG = KcpChannelConfig(channel=CLIENT_CONTROL_CHANNEL, conv_id=CONTROL_CONV_ID)
 MEDIA_CHANNEL_CONFIG = KcpChannelConfig(channel=MEDIA_CHANNEL, conv_id=MEDIA_CONV_ID)
 
@@ -228,6 +237,8 @@ class MinimalKCP:
     PUSH = 81
     ACK = 82
     HEADER_BYTES = 24
+    RECEIVE_WINDOW = 32
+    MTU_BYTES = 1400
 
     def __init__(self, conv_id: int) -> None:
         self.conv_id = conv_id
@@ -236,9 +247,9 @@ class MinimalKCP:
         self._next_sequence = 0
         self._expected_receive_sequence: int | None = None
         self._pending_receive: dict[int, bytes] = {}
-        self._pending_acks: list[bytes] = []
+        self._pending_acks: list[KcpAck] = []
         self._last_ack_flush = time.monotonic()
-        self.ack_batch_size = 3
+        self.ack_max_datagram_bytes = self.MTU_BYTES
         self.ack_flush_interval = 0.01
 
     def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
@@ -273,7 +284,7 @@ class MinimalKCP:
             if command == self.PUSH:
                 self._queue_received(sequence, data[body_start:body_end])
                 una = self._expected_receive_sequence if self._expected_receive_sequence is not None else sequence + 1
-                self._queue_ack(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence, una=una))
+                self._queue_ack(KcpAck(timestamp=timestamp, sequence=sequence, una=una))
             offset = body_end
 
     def get_all_received(self) -> list[bytes]:
@@ -288,7 +299,7 @@ class MinimalKCP:
 
         if not self._pending_acks:
             return
-        if len(self._pending_acks) >= self.ack_batch_size:
+        if self._pending_ack_bytes() >= self.ack_max_datagram_bytes:
             self._flush_acks()
             return
         if time.monotonic() - self._last_ack_flush >= self.ack_flush_interval:
@@ -302,11 +313,13 @@ class MinimalKCP:
         sequence: int,
         una: int = 0,
         payload: bytes = b"",
+        window: int | None = None,
     ) -> bytes:
+        receive_window = self._receive_window() if window is None else window
         return (
             self.conv_id.to_bytes(4, "little")
             + bytes([command, 0])
-            + (32).to_bytes(2, "little")
+            + receive_window.to_bytes(2, "little")
             + timestamp.to_bytes(4, "little", signed=False)
             + sequence.to_bytes(4, "little", signed=False)
             + una.to_bytes(4, "little", signed=False)
@@ -330,14 +343,40 @@ class MinimalKCP:
         if self._outbound_handler is not None:
             self._outbound_handler(self, segment)
 
-    def _queue_ack(self, segment: bytes) -> None:
-        self._pending_acks.append(segment)
-        if len(self._pending_acks) >= self.ack_batch_size:
+    def _queue_ack(self, ack: KcpAck) -> None:
+        if self._pending_acks and self._pending_ack_bytes() + self.HEADER_BYTES > self.ack_max_datagram_bytes:
             self._flush_acks()
+        self._pending_acks.append(ack)
 
     def _flush_acks(self) -> None:
         if not self._pending_acks:
             return
-        self._send(b"".join(self._pending_acks))
-        self._pending_acks.clear()
+        window = self._receive_window()
+        pending = self._pending_acks
+        self._pending_acks = []
+        batch: list[bytes] = []
+        batch_bytes = 0
+        for ack in pending:
+            segment = self._encode_segment(
+                self.ACK,
+                timestamp=ack.timestamp,
+                sequence=ack.sequence,
+                una=ack.una,
+                window=window,
+            )
+            if batch and batch_bytes + len(segment) > self.ack_max_datagram_bytes:
+                self._send(b"".join(batch))
+                batch = []
+                batch_bytes = 0
+            batch.append(segment)
+            batch_bytes += len(segment)
+        if batch:
+            self._send(b"".join(batch))
         self._last_ack_flush = time.monotonic()
+
+    def _pending_ack_bytes(self) -> int:
+        return len(self._pending_acks) * self.HEADER_BYTES
+
+    def _receive_window(self) -> int:
+        queued = len(self._received) + len(self._pending_receive)
+        return max(0, self.RECEIVE_WINDOW - queued)
