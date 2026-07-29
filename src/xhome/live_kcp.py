@@ -249,6 +249,7 @@ class MinimalKCP:
         self._pending_receive: dict[int, bytes] = {}
         self._pending_acks: list[KcpAck] = []
         self._last_ack_flush = time.monotonic()
+        self.ack_batch_size = 3
         self.ack_max_datagram_bytes = self.MTU_BYTES
         self.ack_flush_interval = 0.01
 
@@ -299,7 +300,7 @@ class MinimalKCP:
 
         if not self._pending_acks:
             return
-        if self._pending_ack_bytes() >= self.ack_max_datagram_bytes:
+        if len(self._pending_acks) >= self.ack_batch_size or self._pending_ack_bytes() >= self.ack_max_datagram_bytes:
             self._flush_acks()
             return
         if time.monotonic() - self._last_ack_flush >= self.ack_flush_interval:
@@ -347,6 +348,8 @@ class MinimalKCP:
         if self._pending_acks and self._pending_ack_bytes() + self.HEADER_BYTES > self.ack_max_datagram_bytes:
             self._flush_acks()
         self._pending_acks.append(ack)
+        if len(self._pending_acks) >= self.ack_batch_size:
+            self._flush_acks()
 
     def _flush_acks(self) -> None:
         if not self._pending_acks:

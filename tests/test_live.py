@@ -612,6 +612,7 @@ class LiveTransportTests(unittest.TestCase):
     def test_minimal_kcp_packs_ack_batches_to_native_mtu(self):
         sent = []
         kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.ack_batch_size = 58
         kcp.ack_flush_interval = 0
         kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
 
@@ -622,6 +623,16 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual([len(payload) for payload in sent], [1392, 48])
         self.assertEqual(sum(len(payload) // MinimalKCP.HEADER_BYTES for payload in sent), 60)
         self.assertEqual([payload[4] for payload in sent], [MinimalKCP.ACK, MinimalKCP.ACK])
+
+    def test_minimal_kcp_defaults_to_observed_native_ack_cadence(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+
+        for sequence in range(6):
+            kcp.receive(minimal_kcp_push(sequence=sequence, payload=b"x"))
+
+        self.assertEqual([len(payload) for payload in sent], [72, 72])
 
     def test_minimal_kcp_ack_window_reflects_queued_receive_payloads(self):
         sent = []
