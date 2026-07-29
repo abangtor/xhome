@@ -69,6 +69,7 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("_NativeLiveControlKeeper", camera_source)
         self.assertIn("native_control.refresh_after_first_frame()", camera_source)
         self.assertIn('"live_native_control_start_refreshes"', camera_source)
+        self.assertNotIn("self._send_start_refresh()", camera_source)
         self.assertIn('"live_native_control_read_polls"', camera_source)
         self.assertIn('"live_native_control_status_probes"', camera_source)
         self.assertIn('"live_native_control_device_setting_probes"', camera_source)

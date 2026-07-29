@@ -538,7 +538,6 @@ class _NativeLiveControlKeeper:
         if self._first_frame_refresh_sent:
             return
         self._first_frame_refresh_sent = True
-        self._send_start_refresh()
         self._send_post_start_status_probes()
         self._send_post_start_device_setting_probes()
         now = time.monotonic()
@@ -573,11 +572,6 @@ class _NativeLiveControlKeeper:
             "native_control_last_read_at": self._last_read_at,
             "native_control_last_error": self._last_error,
         }
-
-    def _send_start_refresh(self) -> None:
-        if self._send_control_frame(self._metadata.start_command):
-            self._start_refreshes += 1
-        self._read_pending()
 
     def _send_post_start_status_probes(self) -> None:
         for command in NATIVE_CONTROL_POST_START_STATUS_COMMANDS:
