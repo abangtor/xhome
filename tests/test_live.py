@@ -727,6 +727,19 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(default_probe.raw_channel_kcp_default_prefixes, 1)
         self.assertEqual(default_probe.raw_channel_kcp_missing_prefixes, 1)
 
+    def test_kcp_media_probe_counts_direct_touch_echoes(self):
+        probe = KcpMediaProbe(uid="LSV212PFJU5TQT42R3UX", sock=FakeSendUdpSocket())
+        addr = ("192.168.7.178", 16904)
+
+        probe.receive_packet(
+            decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, b"12345678", channel=RAW_CHANNEL)),
+            addr,
+        )
+
+        self.assertEqual(probe.direct_touch_echoes, 1)
+        self.assertIsNotNone(probe.last_direct_touch_echo_at)
+        self.assertEqual(probe.kcp_payloads, 0)
+
 
 class FakeKCP:
     def __init__(self, conv_id, identity_token):

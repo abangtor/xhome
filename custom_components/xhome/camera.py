@@ -155,6 +155,10 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_p2p_raw_channel_kcp_invalid_segments": self._live_transport_stats.get(
                     "raw_channel_kcp_invalid_segments"
                 ),
+                "live_p2p_direct_touch_echoes": self._live_transport_stats.get("direct_touch_echoes"),
+                "live_p2p_last_direct_touch_echo_at": self._live_transport_stats.get(
+                    "last_direct_touch_echo_at"
+                ),
                 "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
                 "live_app_packets": self._live_transport_stats.get("app_packets"),
                 "live_p2p_frames": self._live_transport_stats.get("frames"),

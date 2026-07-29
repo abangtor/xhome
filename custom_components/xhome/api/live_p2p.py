@@ -497,7 +497,7 @@ class XHomeP2PRendezvousProbe:
                     relay_touch_candidates = [
                         candidate
                         for candidate in relay_candidates
-                        if selected_peer is None or selected_peer in relay_addresses
+                        if selected_peer is not None and selected_peer in relay_addresses
                     ]
                     if relay_touch_candidates and now >= next_relay_touch:
                         for candidate in relay_touch_candidates:
@@ -756,6 +756,8 @@ class KcpMediaProbe:
         self.raw_channel_kcp_default_prefixes = 0
         self.raw_channel_kcp_missing_prefixes = 0
         self.raw_channel_kcp_invalid_segments = 0
+        self.direct_touch_echoes = 0
+        self.last_direct_touch_echo_at: int | None = None
         self._raw_kcp_prefix_by_path: dict[tuple[str, int, int], bytes] = {}
         self._last_stats_frame_count = -1
         self._last_stats_payload_bucket = -1
@@ -781,6 +783,11 @@ class KcpMediaProbe:
         }:
             return
         self.last_kcp_packet_at = now
+        if packet.channel == RAW_CHANNEL and len(packet.payload) == 8:
+            self.direct_touch_echoes += 1
+            self.last_direct_touch_echo_at = now
+            self._emit_stats(force=True)
+            return
         try:
             packet = self._normalize_raw_channel_kcp_packet(packet, addr)
             if packet is None:
@@ -844,6 +851,8 @@ class KcpMediaProbe:
             "raw_channel_kcp_default_prefixes": self.raw_channel_kcp_default_prefixes,
             "raw_channel_kcp_missing_prefixes": self.raw_channel_kcp_missing_prefixes,
             "raw_channel_kcp_invalid_segments": self.raw_channel_kcp_invalid_segments,
+            "direct_touch_echoes": self.direct_touch_echoes,
+            "last_direct_touch_echo_at": self.last_direct_touch_echo_at,
             "udp_packets": self.udp_packets,
             "kcp_payloads": self.kcp_payloads,
             "app_packets": self.app_packets,
