@@ -25,7 +25,7 @@ from .const import CONF_LIVE_STREAM_URL_TEMPLATE, DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
 from .helpers import redact_uid
-from .image import image_rotation_degrees, is_decodable_jpeg, rotate_image_bytes, set_jpeg_exif_orientation
+from .image import image_rotation_degrees, is_decodable_jpeg, rotate_image_bytes
 
 LOGGER = logging.getLogger(__name__)
 DATA_LIVE_CAMERAS = f"{DOMAIN}_live_cameras"
@@ -269,7 +269,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         if not is_decodable_jpeg(image):
             self._live_invalid_jpeg_frames += 1
             return None
-        rotated = set_jpeg_exif_orientation(image, rotation)
+        rotated = rotate_image_bytes(
+            image,
+            rotation,
+            self._attr_content_type,
+        )
         if rotated == image:
             self._live_rotation_failures += 1
             return None

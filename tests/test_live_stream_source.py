@@ -32,7 +32,6 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("_last_live_jpeg", camera_source)
         self.assertIn("image_rotation_degrees", camera_source)
         self.assertIn("rotate_image_bytes", camera_source)
-        self.assertIn("set_jpeg_exif_orientation", camera_source)
         self.assertIn("is_decodable_jpeg", camera_source)
         self.assertIn("def _rotate_jpeg", camera_source)
         self.assertIn("def _rotate_stream_jpeg", camera_source)
