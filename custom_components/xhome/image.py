@@ -17,10 +17,9 @@ from .coordinator import XHomeDataUpdateCoordinator, XHomeLatestEventMedia
 from .entity import XHomeEntity
 
 LOGGER = logging.getLogger(__name__)
-JPEG_EXIF_PREFIX = b"Exif\x00\x00"
-JPEG_ORIENTATION_BY_ROTATION = {0: 1, 90: 6, 180: 3, 270: 8}
 JPEG_SOI = b"\xff\xd8"
-LIVE_ROTATION_EDGE_CROP_PIXELS = 32
+LIVE_ROTATION_EDGE_CROP_MAX_PIXELS = 32
+LIVE_ROTATION_EDGE_CROP_STEP_PIXELS = 8
 
 
 async def async_setup_entry(
@@ -171,19 +170,41 @@ def rotate_live_image_bytes(
     rotation: int,
     content_type: str,
     *,
-    edge_crop_pixels: int = LIVE_ROTATION_EDGE_CROP_PIXELS,
+    edge_crop_pixels: int | None = None,
 ) -> bytes | None:
     """Rotate one live JPEG frame after cropping the unstable source edge."""
+
+    rotated, _crop_pixels = prepare_live_image_bytes(
+        image_bytes,
+        rotation,
+        content_type,
+        edge_crop_pixels=edge_crop_pixels,
+    )
+    return rotated
+
+
+def prepare_live_image_bytes(
+    image_bytes: bytes,
+    rotation: int,
+    content_type: str,
+    *,
+    edge_crop_pixels: int | None = None,
+    minimum_edge_crop_pixels: int = 0,
+) -> tuple[bytes | None, int]:
+    """Rotate one live JPEG frame and return the auto-detected edge crop."""
 
     try:
         from PIL import Image, ImageOps
     except ImportError:
         LOGGER.warning("Pillow is not installed; dropping rotated XHome live image frame")
-        return None
+        return None, minimum_edge_crop_pixels
 
     try:
         with Image.open(BytesIO(image_bytes)) as source:
             image = ImageOps.exif_transpose(source)
+            if edge_crop_pixels is None:
+                edge_crop_pixels = detect_live_rotation_edge_crop(image, rotation)
+            edge_crop_pixels = max(minimum_edge_crop_pixels, edge_crop_pixels)
             image = _crop_live_rotation_edge(image, rotation, edge_crop_pixels)
             if rotation == 90:
                 image = image.transpose(Image.Transpose.ROTATE_270)
@@ -196,10 +217,33 @@ def rotate_live_image_bytes(
 
             output = BytesIO()
             image.save(output, format=_image_format(source, content_type))
-            return output.getvalue()
+            return output.getvalue(), edge_crop_pixels
     except Exception as err:  # noqa: BLE001
         LOGGER.debug("XHome live image rotation failed: %s", err)
-        return None
+        return None, minimum_edge_crop_pixels
+
+
+def detect_live_rotation_edge_crop(
+    image: Any,
+    rotation: int,
+    *,
+    max_crop_pixels: int = LIVE_ROTATION_EDGE_CROP_MAX_PIXELS,
+) -> int:
+    """Return an automatic crop for raw edge padding that becomes a side stripe."""
+
+    if rotation not in {90, 270} or max_crop_pixels <= 0:
+        return 0
+    width, height = image.size
+    if height <= max_crop_pixels + LIVE_ROTATION_EDGE_CROP_STEP_PIXELS:
+        return 0
+
+    edge = "bottom" if rotation == 90 else "top"
+    gray = image.convert("L")
+    if width > 160:
+        gray = gray.resize((160, height))
+    reference_mean, _reference_std = _edge_reference_stats(gray, edge, max_crop_pixels)
+    crop_pixels = _detect_unstable_edge_pixels(gray, edge, reference_mean, max_crop_pixels)
+    return _round_crop_pixels(crop_pixels, max_crop_pixels)
 
 
 def _crop_live_rotation_edge(image: Any, rotation: int, edge_crop_pixels: int) -> Any:
@@ -215,6 +259,59 @@ def _crop_live_rotation_edge(image: Any, rotation: int, edge_crop_pixels: int) -
     return image
 
 
+def _detect_unstable_edge_pixels(image: Any, edge: str, reference_mean: float, max_crop_pixels: int) -> int:
+    """Detect rows near an edge that differ strongly from the interior image."""
+
+    height = image.height
+    crop_pixels = 0
+    good_run = 0
+    for offset in range(1, min(max_crop_pixels, height - 1) + 1):
+        y = height - offset if edge == "bottom" else offset - 1
+        mean, stddev = _row_stats(image, y)
+        unstable = abs(mean - reference_mean) > 24 or (stddev < 8 and abs(mean - reference_mean) > 10)
+        if unstable:
+            crop_pixels = offset
+            good_run = 0
+        else:
+            good_run += 1
+            if good_run >= 4:
+                break
+    return crop_pixels
+
+
+def _edge_reference_stats(image: Any, edge: str, max_crop_pixels: int) -> tuple[float, float]:
+    """Return mean/stddev from rows safely inside the unstable edge scan area."""
+
+    rows: list[tuple[float, float]] = []
+    height = image.height
+    for offset in range(max_crop_pixels + 8, min(max_crop_pixels + 32, height - 1)):
+        y = height - offset if edge == "bottom" else offset - 1
+        if 0 <= y < height:
+            rows.append(_row_stats(image, y))
+    if not rows:
+        return _row_stats(image, height // 2)
+    means = sorted(row[0] for row in rows)
+    stddevs = sorted(row[1] for row in rows)
+    middle = len(rows) // 2
+    return means[middle], stddevs[middle]
+
+
+def _row_stats(image: Any, y: int) -> tuple[float, float]:
+    """Return grayscale mean and standard deviation for one row."""
+
+    row = image.crop((0, y, image.width, y + 1)).tobytes()
+    mean = sum(row) / len(row)
+    variance = sum((value - mean) ** 2 for value in row) / len(row)
+    return mean, variance**0.5
+
+
+def _round_crop_pixels(crop_pixels: int, max_crop_pixels: int) -> int:
+    """Round crop pixels to an MCU-friendly step."""
+
+    rounded = ((crop_pixels + LIVE_ROTATION_EDGE_CROP_STEP_PIXELS - 1) // LIVE_ROTATION_EDGE_CROP_STEP_PIXELS)
+    return min(max_crop_pixels, rounded * LIVE_ROTATION_EDGE_CROP_STEP_PIXELS)
+
+
 def _image_format(image: Any, content_type: str) -> str:
     """Return a Pillow output format for the source image."""
 
@@ -225,96 +322,6 @@ def _image_format(image: Any, content_type: str) -> str:
     if content_type == "image/webp":
         return "WEBP"
     return "JPEG"
-
-
-def set_jpeg_exif_orientation(image_bytes: bytes, rotation: int) -> bytes:
-    """Set a JPEG EXIF orientation tag without re-encoding image pixels."""
-
-    orientation = JPEG_ORIENTATION_BY_ROTATION.get(rotation)
-    if orientation is None or not image_bytes.startswith(JPEG_SOI):
-        return image_bytes
-    updated = _replace_jpeg_exif_orientation(image_bytes, orientation)
-    if updated is not None:
-        return updated
-    return _insert_jpeg_exif_orientation(image_bytes, orientation)
-
-
-def _replace_jpeg_exif_orientation(image_bytes: bytes, orientation: int) -> bytes | None:
-    """Return JPEG bytes with an updated EXIF orientation tag, if present."""
-
-    offset = 2
-    while offset + 4 <= len(image_bytes):
-        if image_bytes[offset] != 0xFF:
-            return None
-        marker = image_bytes[offset + 1]
-        if marker == 0xDA:
-            return None
-        length = int.from_bytes(image_bytes[offset + 2 : offset + 4], "big", signed=False)
-        segment_start = offset + 4
-        segment_end = offset + 2 + length
-        if segment_end > len(image_bytes):
-            return None
-        if marker == 0xE1 and image_bytes[segment_start : segment_start + len(JPEG_EXIF_PREFIX)] == JPEG_EXIF_PREFIX:
-            return _replace_tiff_orientation(image_bytes, segment_start + len(JPEG_EXIF_PREFIX), segment_end, orientation)
-        offset = segment_end
-    return None
-
-
-def _replace_tiff_orientation(
-    image_bytes: bytes,
-    tiff_start: int,
-    segment_end: int,
-    orientation: int,
-) -> bytes | None:
-    """Return JPEG bytes with the TIFF IFD0 orientation value replaced."""
-
-    if tiff_start + 8 > segment_end:
-        return None
-    endian_tag = image_bytes[tiff_start : tiff_start + 2]
-    if endian_tag == b"II":
-        byteorder = "little"
-    elif endian_tag == b"MM":
-        byteorder = "big"
-    else:
-        return None
-    ifd_offset = int.from_bytes(image_bytes[tiff_start + 4 : tiff_start + 8], byteorder, signed=False)
-    ifd_start = tiff_start + ifd_offset
-    if ifd_start + 2 > segment_end:
-        return None
-    entry_count = int.from_bytes(image_bytes[ifd_start : ifd_start + 2], byteorder, signed=False)
-    entries_start = ifd_start + 2
-    for index in range(entry_count):
-        entry_start = entries_start + (index * 12)
-        entry_end = entry_start + 12
-        if entry_end > segment_end:
-            return None
-        tag = int.from_bytes(image_bytes[entry_start : entry_start + 2], byteorder, signed=False)
-        field_type = int.from_bytes(image_bytes[entry_start + 2 : entry_start + 4], byteorder, signed=False)
-        count = int.from_bytes(image_bytes[entry_start + 4 : entry_start + 8], byteorder, signed=False)
-        if tag == 0x0112 and field_type == 3 and count == 1:
-            updated = bytearray(image_bytes)
-            updated[entry_start + 8 : entry_start + 10] = orientation.to_bytes(2, byteorder, signed=False)
-            return bytes(updated)
-    return None
-
-
-def _insert_jpeg_exif_orientation(image_bytes: bytes, orientation: int) -> bytes:
-    """Insert a minimal EXIF orientation segment after the JPEG SOI marker."""
-
-    tiff = (
-        b"MM\x00\x2a"
-        + (8).to_bytes(4, "big")
-        + (1).to_bytes(2, "big")
-        + (0x0112).to_bytes(2, "big")
-        + (3).to_bytes(2, "big")
-        + (1).to_bytes(4, "big")
-        + orientation.to_bytes(2, "big")
-        + b"\x00\x00"
-        + (0).to_bytes(4, "big")
-    )
-    payload = JPEG_EXIF_PREFIX + tiff
-    segment = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
-    return image_bytes[:2] + segment + image_bytes[2:]
 
 
 def is_decodable_jpeg(image_bytes: bytes) -> bool:

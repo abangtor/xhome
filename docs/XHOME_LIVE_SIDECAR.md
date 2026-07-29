@@ -1,22 +1,22 @@
-# XHome Live Sidecar
+# XHome Live Debug CLI
 
 XHome live video is native P2P; it is not a REST, HLS, or RTSP URL. The Home
-Assistant integration prepares a live token through `xhome.prepare_live_stream`.
-This sidecar layer reimplements the transport in portable Python.
+Assistant integration now embeds the native transport directly for normal camera
+use. The `xhome.live_sidecar` module remains as a standalone debugging and
+packet-analysis CLI.
 
-1. receive live-token metadata from Home Assistant or the CLI
+1. fetch live-token metadata through the CLI
 2. log in to the regional native IoT TLS endpoint on port `11201`
 3. send command `20` to request AV
 4. rendezvous with the returned UDP relay and complete the KCP session
 5. strip the 40-byte XHome media header
 6. forward raw H.264/G.711/JPEG payloads to files, ffmpeg, or go2rtc
 
-The implemented Python path currently covers steps 1-5, passive KCP media
-receive/ACK handling, live media dumps, and offline media extraction from
-successful app PCAPs. Captures have shown both relay-shaped and direct-LAN KCP
-media paths carrying JPEG frames. The remaining product gap is hardening that
-receive path into a continuously served Home Assistant stream URL instead of
-debug files.
+The implemented Python path covers steps 1-5, passive KCP media receive/ACK
+handling, live media dumps, and offline media extraction from successful app
+PCAPs. Captures have shown both relay-shaped and direct-LAN KCP media paths
+carrying JPEG frames. Home Assistant no longer needs this CLI for normal live
+camera streaming.
 
 ## Portable Cloud Probe
 
@@ -37,8 +37,8 @@ certificate mismatch; the original Android library appears to tolerate that
 mismatch.
 
 `cloud-probe` and `mjpeg-server` can fetch their own live token. Pass
-`--token` only when you already have a native live token from
-`xhome.prepare_live_stream`. If `--token` is omitted, the sidecar logs in via
+`--token` only when you already have a native live token from another debugging
+path. If `--token` is omitted, the CLI logs in via
 `XHOME_USERNAME`/`XHOME_PASSWORD`, `XHOME_TOKEN`, or the OpenClaw
 `authProfiles.xhome` profile, then calls the REST live-token endpoint. The
 native IoT host defaults from `--region`; override `--native-iot-host` only for

@@ -51,7 +51,6 @@ SERVICE_LIST_DEVICES = "list_devices"
 SERVICE_LIST_LOCK_MEMBERS = "list_lock_members"
 SERVICE_LOCAL_PUSH_STATUS = "local_push_status"
 SERVICE_LIST_TEMPORARY_PASSWORDS = "list_temporary_passwords"
-SERVICE_PREPARE_LIVE_STREAM = "prepare_live_stream"
 SERVICE_RENAME_TEMPORARY_PASSWORD = "rename_temporary_password"
 SERVICE_SET_UNLOCK_TYPE = "set_unlock_type"
 SERVICE_UPDATE_EVENT_MEMBER = "update_event_member"
@@ -203,24 +202,6 @@ def _register_api_services(hass: HomeAssistant) -> None:
             entry,
         )
 
-    async def handle_prepare_live_stream(call: ServiceCall) -> dict[str, Any]:
-        _require_confirmed(call)
-        coordinator = _coordinator_for_service(hass, call, uid=call.data[CONF_UID])
-        session = await coordinator.async_prepare_live_stream(call.data[CONF_UID])
-        return {
-            "uid": session.uid,
-            "device_id": session.device_id,
-            "model": session.model,
-            "native_iot_host": session.native_iot_host,
-            "token": session.token,
-            "start_command": session.start_command,
-            "stop_command": session.stop_command,
-            "video_codec": session.video_codec,
-            "audio_codec": session.audio_codec,
-            "media_header_bytes": session.media_header_bytes,
-            "token_payload": session.token_payload,
-        }
-
     async def handle_add_temporary_password_raw(call: ServiceCall) -> dict[str, Any]:
         _require_confirmed(call)
         return await _call_client_response(
@@ -369,13 +350,6 @@ def _register_api_services(hass: HomeAssistant) -> None:
         SERVICE_LIST_TEMPORARY_PASSWORDS,
         handle_list_temporary_passwords,
         {**_OPTIONAL_CONFIG_ENTRY, vol.Optional(CONF_UID): cv.string, **_ENTRY_SCHEMA},
-        SupportsResponse.ONLY,
-    )
-    _register_service(
-        hass,
-        SERVICE_PREPARE_LIVE_STREAM,
-        handle_prepare_live_stream,
-        {**_UID_SCHEMA, vol.Required(CONF_CONFIRM): cv.boolean},
         SupportsResponse.ONLY,
     )
     _register_service(

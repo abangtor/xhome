@@ -11,7 +11,6 @@
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
           "image_rotation": "Latest event image rotation",
-          "live_stream_url_template": "Live stream URL template",
           "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }
@@ -35,7 +34,6 @@
           "scan_interval": "Device scan interval",
           "event_scan_interval": "Event scan interval",
           "image_rotation": "Latest event image rotation",
-          "live_stream_url_template": "Live stream URL template",
           "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }

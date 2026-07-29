@@ -21,16 +21,15 @@ from homeassistant.helpers.network import get_url
 from .api.live import LiveAppMediaFrame, LiveSessionMetadata, MediaType
 from .api.live_p2p import XHomeP2PRendezvousProbe
 from .api.live_transport import XHomeLiveCloudTransport, extract_p2p_servers
-from .const import CONF_LIVE_STREAM_URL_TEMPLATE, DOMAIN
+from .const import DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
 from .helpers import redact_uid
 from .image import (
-    LIVE_ROTATION_EDGE_CROP_PIXELS,
     image_rotation_degrees,
     is_decodable_jpeg,
+    prepare_live_image_bytes,
     rotate_image_bytes,
-    rotate_live_image_bytes,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -87,6 +86,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
         self._live_invalid_jpeg_frames = 0
+        self._live_rotation_edge_crop_pixels = 0
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
@@ -113,7 +113,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         data = self.device_data
         attrs.update(
             {
-                "live_stream_configured": bool(live_stream_url_template(self.coordinator.config_entry.options)),
                 "embedded_live_stream": True,
                 "bridge": "embedded",
                 "native_transport": "portable_p2p",
@@ -121,7 +120,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "video_codec": "mjpeg",
                 "audio_codec": "g711",
                 "image_rotation": self._image_rotation(),
-                "live_rotation_edge_crop_pixels": LIVE_ROTATION_EDGE_CROP_PIXELS,
+                "live_rotation_edge_crop_mode": "auto",
+                "live_rotation_edge_crop_pixels": self._live_rotation_edge_crop_pixels,
                 "live_streams_started": self._live_streams_started,
                 "live_frames": self._live_frames,
                 "live_rotated_frames": self._live_rotated_frames,
@@ -175,6 +175,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
         self._live_invalid_jpeg_frames = 0
+        self._live_rotation_edge_crop_pixels = 0
         self._live_last_started_at = int(time.time())
         self._live_last_frame_at = None
         self._live_last_error = None
@@ -209,7 +210,12 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     if not thread.is_alive():
                         break
                     continue
-                frame, frame_status = await self.hass.async_add_executor_job(self._prepare_stream_jpeg, frame)
+                frame, frame_status, edge_crop_pixels = await self.hass.async_add_executor_job(
+                    self._prepare_stream_jpeg,
+                    frame,
+                    self._live_rotation_edge_crop_pixels,
+                )
+                self._live_rotation_edge_crop_pixels = max(self._live_rotation_edge_crop_pixels, edge_crop_pixels)
                 if frame_status == "invalid":
                     self._live_invalid_jpeg_frames += 1
                 elif frame_status == "rotation_failed":
@@ -272,24 +278,29 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             self._live_rotated_frames += 1
         return rotated
 
-    def _prepare_stream_jpeg(self, image: bytes) -> tuple[bytes | None, str]:
+    def _prepare_stream_jpeg(
+        self,
+        image: bytes,
+        minimum_edge_crop_pixels: int,
+    ) -> tuple[bytes | None, str, int]:
         """Prepare one MJPEG frame for streaming."""
 
         rotation = self._image_rotation()
         if rotation == 0:
             if not is_decodable_jpeg(image):
-                return None, "invalid"
-            return image, "original"
-        rotated = rotate_live_image_bytes(
+                return None, "invalid", 0
+            return image, "original", 0
+        rotated, edge_crop_pixels = prepare_live_image_bytes(
             image,
             rotation,
             self._attr_content_type,
+            minimum_edge_crop_pixels=minimum_edge_crop_pixels,
         )
         if rotated is None:
-            return None, "invalid"
+            return None, "invalid", edge_crop_pixels
         if rotated == image:
-            return None, "rotation_failed"
-        return rotated, "rotated"
+            return None, "rotation_failed", edge_crop_pixels
+        return rotated, "rotated", edge_crop_pixels
 
     def _image_rotation(self) -> int:
         """Return the configured camera image rotation."""
@@ -318,31 +329,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self.async_write_ha_state()
 
 
-def live_stream_url_template(options: dict[str, Any]) -> str:
-    """Return the configured live-stream sidecar URL template."""
-
-    return str(options.get(CONF_LIVE_STREAM_URL_TEMPLATE) or "").strip()
-
-
-def render_live_stream_url(
-    template: str,
-    *,
-    uid: str,
-    uid_tail: str,
-    device_id: int | None,
-    model: str | None,
-) -> str:
-    """Render a sidecar stream URL with safe known placeholders."""
-
-    values = {
-        "uid": uid,
-        "uid_tail": uid_tail,
-        "device_id": "" if device_id is None else str(device_id),
-        "model": "" if model is None else str(model),
-    }
-    return template.format_map(_SafeFormatMap(values))
-
-
 class XHomeLiveMjpegView(HomeAssistantView):
     """Internal MJPEG endpoint used as the camera stream source."""
 
@@ -362,13 +348,6 @@ class XHomeLiveMjpegView(HomeAssistantView):
         if camera is None:
             raise web.HTTPNotFound()
         return await camera.handle_async_mjpeg_stream(request)
-
-
-class _SafeFormatMap(dict[str, str]):
-    """Leave unknown placeholders intact for sidecar-specific routing."""
-
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
 
 
 def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> None:

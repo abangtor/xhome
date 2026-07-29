@@ -33,11 +33,11 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
         self.assertIn("IMAGE_ROTATIONS", source)
         self.assertIn("selector.SelectSelectorMode.DROPDOWN", source)
 
-    def test_live_stream_url_template_option_is_available(self):
+    def test_external_live_stream_url_template_option_is_not_available(self):
         source = CONFIG_FLOW_PATH.read_text()
 
-        self.assertIn("CONF_LIVE_STREAM_URL_TEMPLATE", source)
-        self.assertIn("DEFAULT_LIVE_STREAM_URL_TEMPLATE", source)
+        self.assertNotIn("CONF_LIVE_STREAM_URL_TEMPLATE", source)
+        self.assertNotIn("DEFAULT_LIVE_STREAM_URL_TEMPLATE", source)
 
 
 if __name__ == "__main__":

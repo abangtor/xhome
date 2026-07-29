@@ -19,7 +19,7 @@ class LiveStreamSourceTests(unittest.TestCase):
         const_source = CONST_PATH.read_text()
         hacs = json.loads(HACS_PATH.read_text())
 
-        self.assertIn("CONF_LIVE_STREAM_URL_TEMPLATE", const_source)
+        self.assertNotIn("CONF_LIVE_STREAM_URL_TEMPLATE", const_source)
         self.assertIn("Platform.CAMERA", const_source)
         self.assertIn("camera", hacs["domains"])
 
@@ -33,12 +33,13 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("image_rotation_degrees", camera_source)
         self.assertIn("rotate_image_bytes", camera_source)
         self.assertIn("is_decodable_jpeg", camera_source)
-        self.assertIn("rotate_live_image_bytes", camera_source)
+        self.assertIn("prepare_live_image_bytes", camera_source)
         self.assertIn("def _rotate_jpeg", camera_source)
         self.assertIn("def _prepare_stream_jpeg", camera_source)
         self.assertIn("if frame is None:", camera_source)
         self.assertIn('"image_rotation": self._image_rotation()', camera_source)
-        self.assertIn('"live_rotation_edge_crop_pixels": LIVE_ROTATION_EDGE_CROP_PIXELS', camera_source)
+        self.assertIn('"live_rotation_edge_crop_mode": "auto"', camera_source)
+        self.assertIn('"live_rotation_edge_crop_pixels": self._live_rotation_edge_crop_pixels', camera_source)
         self.assertIn('"live_rotated_frames": self._live_rotated_frames', camera_source)
         self.assertIn('"live_rotation_failures": self._live_rotation_failures', camera_source)
         self.assertIn('"live_invalid_jpeg_frames": self._live_invalid_jpeg_frames', camera_source)
@@ -50,7 +51,8 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("secrets.token_urlsafe", camera_source)
         self.assertIn("get_url(hass, prefer_external=False)", camera_source)
         self.assertIn("live_last_error", camera_source)
-        self.assertIn("render_live_stream_url", camera_source)
+        self.assertNotIn("render_live_stream_url", camera_source)
+        self.assertNotIn("live_stream_url_template", camera_source)
         self.assertIn('"embedded_live_stream": True', camera_source)
         self.assertIn('"native_transport": "portable_p2p"', camera_source)
         self.assertIn("XHomeP2PRendezvousProbe", camera_source)
@@ -70,12 +72,12 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("media_header_bytes: int = 40", coordinator_source)
         self.assertIn("normalize_region(_entry_region(self.config_entry)).native_iot_host", coordinator_source)
 
-    def test_live_stream_ui_strings_are_present(self):
+    def test_live_stream_ui_strings_are_present_without_external_sidecar_config(self):
         strings = STRINGS_PATH.read_text()
         translations = TRANSLATIONS_PATH.read_text()
 
         for source in (strings, translations):
-            self.assertIn("live_stream_url_template", source)
+            self.assertNotIn("live_stream_url_template", source)
             self.assertIn("live_camera", source)
 
 

@@ -155,7 +155,6 @@ implemented in the Python client and exposed as Home Assistant services:
 - `xhome.add_temporary_password_raw`
 - `xhome.rename_temporary_password`
 - `xhome.delete_temporary_password`
-- `xhome.prepare_live_stream`
 
 `add_temporary_password` reimplements the Android `IVIEWSPassword` encoder from
 `libIVIEWSPSD.so`: AES-CBC over the password using `uuid[4:20]` as key, a
@@ -235,17 +234,13 @@ token, starts the native rendezvous worker in-process, and serves the received
 JPEG frames as MJPEG.
 
 The camera entity always uses the embedded stream path and does not expose live
-tokens in state.
+tokens in state. The old external bridge/URL-template setup path has been
+removed from the Home Assistant integration.
 
-For bridge development, call the response service `xhome.prepare_live_stream`
-with `uid` and `confirm: true`. It returns the live token, native IoT host, start
-command `20`, stop command `21`, codec names, and the 40-byte media header size
-needed by a sidecar. Treat that response like a secret; the live token is
-credential material.
-
-The repo also includes standalone debugging tools in `xhome.live_sidecar` for
+The repo still includes standalone debugging tools in `xhome.live_sidecar` for
 cloud probes, PCAP extraction, and temporary MJPEG serving outside Home
-Assistant. See `docs/XHOME_LIVE_SIDECAR.md`.
+Assistant. They are for reverse engineering and troubleshooting, not normal HA
+operation. See `docs/XHOME_LIVE_SIDECAR.md`.
 
 The Home Assistant custom component includes the small KCP subset it needs to
 ACK and reassemble the native media stream, so it does not require a separate

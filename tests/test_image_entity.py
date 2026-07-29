@@ -105,30 +105,21 @@ class ImageEntityTests(unittest.TestCase):
     def test_rotate_image_bytes_noops_without_rotation(self):
         self.assertEqual(image.rotate_image_bytes(b"not really an image", 0, "image/jpeg"), b"not really an image")
 
-    def test_set_jpeg_exif_orientation_updates_existing_tag(self):
-        jpeg = (
-            b"\xff\xd8"
-            + b"\xff\xe1\x00\x22Exif\x00\x00"
-            + b"MM\x00\x2a\x00\x00\x00\x08"
-            + b"\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x01\x00\x00"
-            + b"\x00\x00\x00\x00"
-            + b"\xff\xda"
-        )
-
-        updated = image.set_jpeg_exif_orientation(jpeg, 90)
-
-        self.assertIn(b"\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00", updated)
-
-    def test_set_jpeg_exif_orientation_inserts_missing_tag(self):
-        jpeg = b"\xff\xd8\xff\xe0\x00\x04\xff\xda"
-
-        updated = image.set_jpeg_exif_orientation(jpeg, 270)
-
-        self.assertIn(b"Exif\x00\x00", updated)
-        self.assertIn(b"\x01\x12\x00\x03\x00\x00\x00\x01\x00\x08\x00\x00", updated)
-
     def test_is_decodable_jpeg_rejects_non_jpeg(self):
         self.assertFalse(image.is_decodable_jpeg(b"not a jpeg"))
+
+    def test_detect_live_rotation_edge_crop_finds_unstable_bottom_edge(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+
+        frame = Image.new("L", (20, 24), 160)
+        for y in range(16, 24):
+            for x in range(20):
+                frame.putpixel((x, y), 20)
+
+        self.assertEqual(image.detect_live_rotation_edge_crop(frame, 90, max_crop_pixels=16), 8)
 
     def test_rotate_live_image_bytes_crops_source_edge_before_rotation(self):
         try:
@@ -149,6 +140,24 @@ class ImageEntityTests(unittest.TestCase):
         self.assertIsNotNone(rotated)
         with Image.open(BytesIO(rotated)) as rotated_image:
             self.assertEqual(rotated_image.size, (4, 10))
+
+    def test_prepare_live_image_bytes_reports_auto_crop(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+
+        source = BytesIO()
+        Image.new("RGB", (10, 6), "white").save(source, format="JPEG")
+
+        _rotated, crop_pixels = image.prepare_live_image_bytes(
+            source.getvalue(),
+            90,
+            "image/jpeg",
+            minimum_edge_crop_pixels=4,
+        )
+
+        self.assertGreaterEqual(crop_pixels, 4)
 
 
 if __name__ == "__main__":
