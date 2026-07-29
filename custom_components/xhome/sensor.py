@@ -182,14 +182,6 @@ class XHomeLatestEventVideoSensor(XHomeEntity, SensorEntity):
                 "video_size": media.video_size,
             }
         )
-        downloaded = self.coordinator.downloaded_event_media(self.uid)
-        if downloaded is not None and downloaded.event_key == media.event_key:
-            attrs.update(
-                {
-                    "saved_video_path": downloaded.video_path,
-                    "saved_at": downloaded.saved_at,
-                }
-            )
         return {key: value for key, value in attrs.items() if value is not None}
 
     @property

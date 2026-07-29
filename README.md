@@ -25,7 +25,6 @@ Expose XHome door devices cleanly in Home Assistant:
 - Writable controls for routine device settings and remote-unlock configuration
 - API helper services for lock members and temporary-password/auth records
 - Latest event image through a native Home Assistant image entity
-- Manual latest event image/video download into Home Assistant media
 - Event/media polling where the cloud REST API supports it
 - Embedded live camera entity using the native XHome P2P JPEG stream
 - Optional direct local push listener for near-real-time XHome events
@@ -210,12 +209,10 @@ If the latest-event image is sideways, set the integration option `Latest event
 image rotation` to `90`, `180`, or `270`. The option rotates the image bytes
 served by the entity and does not change the camera/device configuration.
 
-Each device also has a `Fetch latest event media` button. Pressing it polls the
-latest cloud event for that device, resolves available OSS media, and saves the
-latest image and any event video clip under Home Assistant's `media/xhome/...`
-folder. The `Latest event image` entity and `Latest event video` sensor expose
-only non-sensitive metadata and local media paths; signed OSS URLs are not
-exposed in entity state or diagnostics.
+Event processing resolves available OSS media automatically when XHome reports a
+new event. The `Latest event image` entity and `Latest event video` sensor
+expose only non-sensitive metadata; signed OSS URLs are not exposed in entity
+state or diagnostics.
 
 This is event media, not a live camera stream or a command to start recording.
 Live viewing and active recording use the app's native P2P stack.

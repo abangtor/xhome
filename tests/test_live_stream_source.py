@@ -20,7 +20,9 @@ class LiveStreamSourceTests(unittest.TestCase):
         hacs = json.loads(HACS_PATH.read_text())
 
         self.assertNotIn("CONF_LIVE_STREAM_URL_TEMPLATE", const_source)
+        self.assertNotIn("Platform.BUTTON", const_source)
         self.assertIn("Platform.CAMERA", const_source)
+        self.assertNotIn("button", hacs["domains"])
         self.assertIn("camera", hacs["domains"])
 
     def test_live_camera_uses_embedded_mjpeg_stream_without_token_attribute(self):
@@ -149,6 +151,7 @@ class LiveStreamSourceTests(unittest.TestCase):
 
         for source in (strings, translations):
             self.assertNotIn("live_stream_url_template", source)
+            self.assertNotIn("fetch_latest_event_media", source)
             self.assertIn("live_camera", source)
 
 

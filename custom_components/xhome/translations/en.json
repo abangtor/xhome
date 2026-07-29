@@ -46,11 +46,6 @@
         "name": "Door lock"
       }
     },
-    "button": {
-      "fetch_latest_event_media": {
-        "name": "Fetch latest event media"
-      }
-    },
     "sensor": {
       "battery": {
         "name": "Battery"

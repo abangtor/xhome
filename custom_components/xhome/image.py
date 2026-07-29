@@ -94,14 +94,6 @@ class XHomeLatestEventImage(XHomeEntity, ImageEntity):
                 "video_size": media.video_size,
             }
         )
-        downloaded = self.coordinator.downloaded_event_media(self.uid)
-        if downloaded is not None and downloaded.event_key == media.event_key:
-            attrs.update(
-                {
-                    "saved_image_path": downloaded.image_path,
-                    "saved_at": downloaded.saved_at,
-                }
-            )
         return {key: value for key, value in attrs.items() if value is not None}
 
     async def async_image(self) -> bytes | None:

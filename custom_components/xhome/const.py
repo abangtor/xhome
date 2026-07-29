@@ -29,7 +29,6 @@ IMAGE_ROTATIONS = [0, 90, 180, 270]
 
 PLATFORMS = [
     Platform.LOCK,
-    Platform.BUTTON,
     Platform.CAMERA,
     Platform.SWITCH,
     Platform.SELECT,

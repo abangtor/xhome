@@ -89,7 +89,6 @@ class ImageEntityTests(unittest.TestCase):
             hass=object(),
             config_entry=types.SimpleNamespace(options={}),
             latest_event_media=lambda uid: None,
-            downloaded_event_media=lambda uid: None,
         )
 
         entity = image.XHomeLatestEventImage(coordinator, "abc")
