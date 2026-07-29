@@ -105,22 +105,10 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
-        self._live_mjpeg_clients_started = 0
         self._live_mjpeg_clients_active = 0
-        self._live_mjpeg_clients_ended = 0
         self._live_mjpeg_frames_written = 0
-        self._live_mjpeg_last_started_at: int | None = None
-        self._live_mjpeg_last_write_at: int | None = None
-        self._live_mjpeg_last_ended_at: int | None = None
-        self._live_mjpeg_last_duration: float | None = None
         self._live_mjpeg_last_end_reason: str | None = None
-        self._live_mjpeg_last_request_path: str | None = None
-        self._live_mjpeg_last_user_agent: str | None = None
         self._live_mjpeg_stream_generation = 0
-        self._live_native_stop_commands_sent = 0
-        self._live_native_stop_commands_skipped = 0
-        self._live_native_stop_commands_failed = 0
-        self._live_transport_stats: dict[str, Any] = {}
         self._live_last_state_write_at = 0.0
 
     @property
@@ -141,14 +129,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
         attrs = super().extra_state_attributes
         data = self.device_data
-        sent = self._live_transport_stats.get("sent") or {}
-        selected_peer = self._live_transport_stats.get("selected_peer") or {}
         attrs.update(
             {
                 "embedded_live_stream": True,
                 "bridge": "embedded",
                 "native_transport": "portable_p2p",
-                "native_media_header_bytes": 40,
                 "video_codec": "mjpeg",
                 "audio_codec": "g711",
                 "image_rotation": self._image_rotation(),
@@ -159,107 +144,15 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_rotated_frames": self._live_rotated_frames,
                 "live_rotation_failures": self._live_rotation_failures,
                 "live_invalid_jpeg_frames": self._live_invalid_jpeg_frames,
-                "live_mjpeg_clients_started": self._live_mjpeg_clients_started,
                 "live_mjpeg_clients_active": self._live_mjpeg_clients_active,
-                "live_mjpeg_clients_ended": self._live_mjpeg_clients_ended,
                 "live_mjpeg_frames_written": self._live_mjpeg_frames_written,
-                "live_mjpeg_last_started_at": self._live_mjpeg_last_started_at,
-                "live_mjpeg_last_write_at": self._live_mjpeg_last_write_at,
-                "live_mjpeg_last_ended_at": self._live_mjpeg_last_ended_at,
-                "live_mjpeg_last_duration": self._live_mjpeg_last_duration,
                 "live_mjpeg_last_end_reason": self._live_mjpeg_last_end_reason,
-                "live_mjpeg_last_request_path": self._live_mjpeg_last_request_path,
-                "live_mjpeg_last_user_agent": self._live_mjpeg_last_user_agent,
-                "live_mjpeg_debug_path": _native_mjpeg_path(
-                    self.coordinator.config_entry.entry_id,
-                    self.uid,
-                    self._stream_token,
-                ),
                 "live_mjpeg_view_path": _native_mjpeg_view_path(
                     self.coordinator.config_entry.entry_id,
                     self.uid,
                     self._stream_token,
                 ),
                 "live_mjpeg_view_reconnect_seconds": MJPEG_VIEW_RECONNECT_INTERVAL,
-                "live_mjpeg_stream_generation": self._live_mjpeg_stream_generation,
-                "live_native_control_stop_commands_sent": self._live_native_stop_commands_sent,
-                "live_native_control_stop_commands_skipped": self._live_native_stop_commands_skipped,
-                "live_native_control_stop_commands_failed": self._live_native_stop_commands_failed,
-                "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
-                "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
-                "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
-                "live_p2p_kcp_window_probe_requests": self._live_transport_stats.get(
-                    "kcp_window_probe_requests"
-                ),
-                "live_p2p_kcp_window_probe_responses": self._live_transport_stats.get(
-                    "kcp_window_probe_responses"
-                ),
-                "live_p2p_raw_kcp_prefixes": self._live_transport_stats.get("raw_kcp_prefixes"),
-                "live_p2p_raw_channel_kcp_segments": self._live_transport_stats.get("raw_channel_kcp_segments"),
-                "live_p2p_raw_channel_kcp_default_prefixes": self._live_transport_stats.get(
-                    "raw_channel_kcp_default_prefixes"
-                ),
-                "live_p2p_raw_channel_kcp_missing_prefixes": self._live_transport_stats.get(
-                    "raw_channel_kcp_missing_prefixes"
-                ),
-                "live_p2p_raw_channel_kcp_invalid_segments": self._live_transport_stats.get(
-                    "raw_channel_kcp_invalid_segments"
-                ),
-                "live_p2p_direct_touch_echoes": self._live_transport_stats.get("direct_touch_echoes"),
-                "live_p2p_last_direct_touch_echo_at": self._live_transport_stats.get(
-                    "last_direct_touch_echo_at"
-                ),
-                "live_p2p_unreliable_media_packets": self._live_transport_stats.get(
-                    "unreliable_media_packets"
-                ),
-                "live_p2p_unreliable_media_frames": self._live_transport_stats.get("unreliable_media_frames"),
-                "live_p2p_unreliable_g711_frames": self._live_transport_stats.get("unreliable_g711_frames"),
-                "live_p2p_unreliable_media_parse_errors": self._live_transport_stats.get(
-                    "unreliable_media_parse_errors"
-                ),
-                "live_p2p_last_unreliable_media_at": self._live_transport_stats.get(
-                    "last_unreliable_media_at"
-                ),
-                "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
-                "live_app_packets": self._live_transport_stats.get("app_packets"),
-                "live_p2p_frames": self._live_transport_stats.get("frames"),
-                "live_p2p_jpeg_frames": self._live_transport_stats.get("jpeg_frames"),
-                "live_p2p_packets": self._live_transport_stats.get("packets"),
-                "live_p2p_candidate_count": self._live_transport_stats.get("candidate_count"),
-                "live_p2p_loop_ticks": self._live_transport_stats.get("loop_ticks"),
-                "live_p2p_selected_peer": _peer_label(selected_peer),
-                "live_p2p_sent_heartbeats": sent.get("heartbeat"),
-                "live_p2p_sent_relay_heartbeats": sent.get("relay_heartbeat"),
-                "live_p2p_sent_peer_heartbeats": sent.get("peer_heartbeat"),
-                "live_p2p_sent_direct_touches": sent.get("direct_touch_channel4"),
-                "live_p2p_sent_relay_info": sent.get("relay_info"),
-                "live_p2p_sent_relay_touches": sent.get("relay_touch_channel4"),
-                "live_p2p_last_packet_at": self._live_transport_stats.get("last_packet_at"),
-                "live_p2p_last_kcp_packet_at": self._live_transport_stats.get("last_kcp_packet_at"),
-                "live_p2p_last_payload_at": self._live_transport_stats.get("last_payload_at"),
-                "live_p2p_last_probe_frame_at": self._live_transport_stats.get("last_frame_at"),
-                "live_media_probe_error": self._live_transport_stats.get("error"),
-                "live_native_control_start_refreshes": self._live_transport_stats.get(
-                    "native_control_start_refreshes"
-                ),
-                "live_native_control_keepalives": self._live_transport_stats.get("native_control_keepalives"),
-                "live_native_control_read_polls": self._live_transport_stats.get("native_control_read_polls"),
-                "live_native_control_status_probes": self._live_transport_stats.get(
-                    "native_control_status_probes"
-                ),
-                "live_native_control_device_setting_probes": self._live_transport_stats.get(
-                    "native_control_device_setting_probes"
-                ),
-                "live_native_control_frames": self._live_transport_stats.get("native_control_frames"),
-                "live_native_control_last_command": self._live_transport_stats.get(
-                    "native_control_last_command"
-                ),
-                "live_native_control_last_device_setting_command": self._live_transport_stats.get(
-                    "native_control_last_device_setting_command"
-                ),
-                "live_native_control_last_sent_at": self._live_transport_stats.get("native_control_last_sent_at"),
-                "live_native_control_last_read_at": self._live_transport_stats.get("native_control_last_read_at"),
-                "live_native_control_last_error": self._live_transport_stats.get("native_control_last_error"),
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
                 "live_last_error": self._live_last_error,
@@ -288,12 +181,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         def on_error(message: str) -> None:
             loop.call_soon_threadsafe(self._handle_live_error, message)
 
-        def on_stats(stats: dict[str, Any]) -> None:
-            loop.call_soon_threadsafe(self._handle_live_transport_stats, stats)
-
-        def on_native_stop(status: str) -> None:
-            loop.call_soon_threadsafe(self._handle_live_native_stop, status)
-
         self._live_streams_started += 1
         self._live_mjpeg_stream_generation += 1
         stream_generation = self._live_mjpeg_stream_generation
@@ -305,17 +192,9 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_started_at = int(time.time())
         self._live_last_frame_at = None
         self._live_last_error = None
-        self._live_transport_stats = {}
-        self._live_mjpeg_clients_started += 1
         self._live_mjpeg_clients_active += 1
         self._live_mjpeg_frames_written = 0
-        self._live_mjpeg_last_started_at = int(time.time())
-        self._live_mjpeg_last_write_at = None
-        self._live_mjpeg_last_ended_at = None
-        self._live_mjpeg_last_duration = None
         self._live_mjpeg_last_end_reason = None
-        self._live_mjpeg_last_request_path = str(request.rel_url)
-        self._live_mjpeg_last_user_agent = (request.headers.get("User-Agent") or "")[:160] or None
         self._write_live_state(force=True)
 
         thread = Thread(
@@ -324,16 +203,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 session,
                 on_frame,
                 on_error,
-                on_stats,
                 stop_event,
                 lambda generation=stream_generation: self._live_mjpeg_stream_generation == generation,
-                on_native_stop,
             ),
             name=f"xhome-live-{redact_uid(self.uid)}",
             daemon=True,
         )
         thread.start()
-        mjpeg_started_monotonic = time.monotonic()
         end_reason = "completed"
 
         response = web.StreamResponse(
@@ -389,7 +265,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 )
                 await response.drain()
                 self._live_mjpeg_frames_written += 1
-                self._live_mjpeg_last_write_at = int(time.time())
                 self._write_live_state()
         except asyncio.CancelledError:
             end_reason = "cancelled"
@@ -403,9 +278,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             stop_event.set()
             await self.hass.async_add_executor_job(thread.join, 2)
             self._live_mjpeg_clients_active = max(0, self._live_mjpeg_clients_active - 1)
-            self._live_mjpeg_clients_ended += 1
-            self._live_mjpeg_last_ended_at = int(time.time())
-            self._live_mjpeg_last_duration = round(time.monotonic() - mjpeg_started_monotonic, 3)
             self._live_mjpeg_last_end_reason = end_reason
             self._write_live_state(force=True)
 
@@ -481,23 +353,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         """Store one native live stream error for diagnostics."""
 
         self._live_last_error = message
-        self._write_live_state(force=True)
-
-    def _handle_live_transport_stats(self, stats: dict[str, Any]) -> None:
-        """Store compact native media pipeline counters for diagnostics."""
-
-        self._live_transport_stats = stats
-        self._write_live_state()
-
-    def _handle_live_native_stop(self, status: str) -> None:
-        """Track native stop commands skipped for stale MJPEG clients."""
-
-        if status == "sent":
-            self._live_native_stop_commands_sent += 1
-        elif status == "skipped":
-            self._live_native_stop_commands_skipped += 1
-        elif status == "failed":
-            self._live_native_stop_commands_failed += 1
         self._write_live_state(force=True)
 
     def _write_live_state(self, *, force: bool = False) -> None:
@@ -685,22 +540,12 @@ openStream();
 """
 
 
-def _peer_label(peer: Any) -> str | None:
-    """Return a compact peer label for live P2P diagnostics."""
-
-    if not isinstance(peer, dict) or "host" not in peer or "port" not in peer:
-        return None
-    return f"{peer['host']}:{peer['port']}"
-
-
 def _run_native_mjpeg_worker(
     session: XHomeLiveStreamSession,
     on_frame: Any,
     on_error: Any,
-    on_stats: Any,
     stop_event: Event,
     should_send_stop: Any | None = None,
-    on_native_stop: Any | None = None,
 ) -> None:
     """Run one blocking native live session for the MJPEG response."""
 
@@ -733,10 +578,8 @@ def _run_native_mjpeg_worker(
                     native_control.refresh_after_first_frame()
                     on_frame(frame)
 
-                def on_native_stats(stats: dict[str, Any]) -> None:
+                def on_native_stats(_stats: dict[str, Any]) -> None:
                     native_control.tick()
-                    stats.update(native_control.as_dict())
-                    on_stats(stats)
 
                 XHomeP2PRendezvousProbe(
                     uid=metadata.uid,
@@ -749,16 +592,11 @@ def _run_native_mjpeg_worker(
                     stop_event=stop_event,
                 )
             finally:
-                stop_status = "skipped"
                 if should_send_stop is None or should_send_stop():
-                    stop_status = "failed"
                     try:
                         transport.send_frame(metadata.stop_command)
-                        stop_status = "sent"
                     except Exception as err:  # noqa: BLE001
                         LOGGER.debug("XHome native live stop command failed: %s", err)
-                if on_native_stop is not None:
-                    on_native_stop(stop_status)
     except Exception as err:  # noqa: BLE001
         message = str(err)
         on_error(message)
@@ -776,17 +614,6 @@ class _NativeLiveControlKeeper:
         self._first_frame_refresh_sent = False
         self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
         self._next_read = time.monotonic() + NATIVE_CONTROL_READ_INTERVAL
-        self._start_refreshes = 0
-        self._keepalives = 0
-        self._read_polls = 0
-        self._status_probes = 0
-        self._device_setting_probes = 0
-        self._frames = 0
-        self._last_command: int | None = None
-        self._last_device_setting_command: int | None = None
-        self._last_sent_at: int | None = None
-        self._last_read_at: int | None = None
-        self._last_error: str | None = None
 
     def refresh_after_first_frame(self) -> None:
         """Mirror the native app's post-media-start control traffic."""
@@ -812,63 +639,32 @@ class _NativeLiveControlKeeper:
             self._next_keepalive = now + NATIVE_CONTROL_KEEPALIVE_INTERVAL
             self._next_read = now + NATIVE_CONTROL_READ_INTERVAL
 
-    def as_dict(self) -> dict[str, Any]:
-        """Return compact diagnostics for camera attributes."""
-
-        return {
-            "native_control_start_refreshes": self._start_refreshes,
-            "native_control_keepalives": self._keepalives,
-            "native_control_read_polls": self._read_polls,
-            "native_control_status_probes": self._status_probes,
-            "native_control_device_setting_probes": self._device_setting_probes,
-            "native_control_frames": self._frames,
-            "native_control_last_command": self._last_command,
-            "native_control_last_device_setting_command": self._last_device_setting_command,
-            "native_control_last_sent_at": self._last_sent_at,
-            "native_control_last_read_at": self._last_read_at,
-            "native_control_last_error": self._last_error,
-        }
-
     def _send_post_start_status_probes(self) -> None:
         for command in NATIVE_CONTROL_POST_START_STATUS_COMMANDS:
-            if self._send_control_frame(command):
-                self._status_probes += 1
+            self._send_control_frame(command)
         self._read_pending()
 
     def _send_post_start_device_setting_probes(self) -> None:
         for command in NATIVE_CONTROL_POST_START_DEVICE_COMMANDS:
             payload = encode_device_setting_payload(command)
-            if self._send_control_frame(ControlCommand.DEVICE_SETTING_COMB_CMD, payload):
-                self._device_setting_probes += 1
-                self._last_device_setting_command = int(command)
+            self._send_control_frame(ControlCommand.DEVICE_SETTING_COMB_CMD, payload)
         self._read_pending()
 
     def _send_keepalive(self) -> None:
-        if self._send_control_frame(ControlCommand.GET_BATTERY_LEVEL_REQ):
-            self._keepalives += 1
+        self._send_control_frame(ControlCommand.GET_BATTERY_LEVEL_REQ)
         self._read_pending()
 
-    def _send_control_frame(self, command: int, payload: bytes = b"") -> bool:
+    def _send_control_frame(self, command: int, payload: bytes = b"") -> None:
         try:
             self._transport.send_frame(command, payload)
         except Exception as err:  # noqa: BLE001
-            self._last_error = str(err)
-            return False
-        self._last_command = int(command)
-        self._last_sent_at = int(time.time())
-        return True
+            LOGGER.debug("XHome native live control send failed: %s", err)
 
     def _read_pending(self, *, duration: float = 0.05) -> None:
-        self._read_polls += 1
         try:
-            frames = self._transport.read_available(duration=duration)
+            self._transport.read_available(duration=duration)
         except Exception as err:  # noqa: BLE001
-            self._last_error = str(err)
-            return
-        if not frames:
-            return
-        self._frames += len(frames)
-        self._last_read_at = int(time.time())
+            LOGGER.debug("XHome native live control read failed: %s", err)
 
 
 def _unique_p2p_relays(servers: list[dict[str, Any]]) -> list[tuple[str, int]]:
