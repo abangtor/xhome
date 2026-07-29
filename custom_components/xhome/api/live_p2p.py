@@ -348,9 +348,11 @@ class XHomeP2PRendezvousProbe:
         interval: float = 0.05,
         kcp_start_command: int | None = None,
         kcp_start_interval: float = 0.5,
+        direct_touch_burst_size: int = 4,
         relay_touch_burst_size: int = 4,
         relay_touch_interval: float = 2.0,
         relay_touch_time_offset: float = 0.0,
+        heartbeat_interval: float = 2.0,
         h264_out: Path | None = None,
         g711_out: Path | None = None,
         jpeg_dir: Path | None = None,
@@ -467,15 +469,16 @@ class XHomeP2PRendezvousProbe:
                         direct_touch_targets.add(selected_peer)
                     if direct_touch_targets and now >= next_direct_touch:
                         for target in direct_touch_targets:
-                            sock.sendto(
-                                encode_udp_packet(
-                                    P2PPacketType.KCP_DATA,
-                                    build_direct_touch_payload(now=time.time() + relay_touch_time_offset),
-                                    channel=RAW_CHANNEL,
-                                ),
-                                target,
-                            )
-                            sent_counts["direct_touch_channel4"] += 1
+                            for _ in range(direct_touch_burst_size):
+                                sock.sendto(
+                                    encode_udp_packet(
+                                        P2PPacketType.KCP_DATA,
+                                        build_direct_touch_payload(now=time.time() + relay_touch_time_offset),
+                                        channel=RAW_CHANNEL,
+                                    ),
+                                    target,
+                                )
+                                sent_counts["direct_touch_channel4"] += 1
                         next_direct_touch = now + relay_touch_interval
 
                     if relay_candidates and now >= next_relay_touch:
@@ -512,7 +515,7 @@ class XHomeP2PRendezvousProbe:
                         for target in heartbeat_targets:
                             sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), target)
                             sent_counts["heartbeat"] += 1
-                        next_heartbeat = now + 3.0
+                        next_heartbeat = now + heartbeat_interval
 
                     for received, addr in read_udp_available_with_addresses(
                         sock,
