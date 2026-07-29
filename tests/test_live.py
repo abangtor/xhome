@@ -502,12 +502,16 @@ class LiveTransportTests(unittest.TestCase):
 
         self.assertEqual(payload, b"12345678LSV212PFJU5TQT42R3UX")
 
-    def test_relay_touch_nonce_starts_with_unix_seconds(self):
-        nonce = build_relay_touch_nonce(now=1_785_236_585, tick=607_005)
+    def test_relay_touch_nonce_matches_native_timeval_shape(self):
+        nonce = build_relay_touch_nonce(now=1_785_236_585, microseconds=607_005)
 
         self.assertEqual(len(nonce), 8)
         self.assertEqual(nonce[:4], (1_785_236_585).to_bytes(4, "little"))
         self.assertEqual(nonce[4:], (607_005).to_bytes(4, "little"))
+
+    def test_relay_touch_nonce_rejects_invalid_microseconds(self):
+        with self.assertRaises(ValueError):
+            build_relay_touch_nonce(now=1_785_236_585, microseconds=1_000_000)
 
     def test_direct_touch_payload_is_eight_byte_nonce_without_uid_suffix(self):
         payload = build_direct_touch_payload(nonce=b"12345678")

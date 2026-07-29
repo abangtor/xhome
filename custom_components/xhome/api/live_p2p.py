@@ -208,19 +208,21 @@ def build_uid_payload(*, uid: str, include_key: bool = False) -> bytes:
     return build_json_payload(payload)
 
 
-def build_relay_touch_nonce(*, now: float | None = None, tick: int | None = None) -> bytes:
-    """Build the native-looking eight-byte relay touch nonce.
+def build_relay_touch_nonce(*, now: float | None = None, microseconds: int | None = None) -> bytes:
+    """Build the native eight-byte channel-4 touch timestamp.
 
-    PCAPs from the Android app show four-byte little-endian Unix seconds
-    followed by four opaque bytes. The relay echoes the opaque nonce back; no
-    payload cryptography has been observed here.
+    ``sendPacketData`` in ``libIVIEWSAVAPIs.so`` writes the low 32 bits of
+    ``gettimeofday().tv_sec`` followed by the low 32 bits of
+    ``gettimeofday().tv_usec``. The door echoes these bytes back and appears to
+    use them as the direct-P2P keepalive touch.
     """
 
-    seconds = int(time.time() if now is None else now)
-    native_tick = int(time.monotonic() * 45_000) if tick is None else tick
-    return seconds.to_bytes(4, "little", signed=False) + (native_tick & 0xFFFFFFFF).to_bytes(
-        4, "little", signed=False
-    )
+    timestamp = time.time() if now is None else now
+    seconds = int(timestamp)
+    usec = int((timestamp - seconds) * 1_000_000) if microseconds is None else microseconds
+    if usec < 0 or usec >= 1_000_000:
+        raise ValueError("Direct touch timestamp microseconds must be in [0, 1000000)")
+    return seconds.to_bytes(4, "little", signed=False) + usec.to_bytes(4, "little", signed=False)
 
 
 def build_direct_touch_payload(*, nonce: bytes | None = None, now: float | None = None) -> bytes:
