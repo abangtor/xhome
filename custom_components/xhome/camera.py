@@ -102,6 +102,15 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
+        self._live_mjpeg_clients_started = 0
+        self._live_mjpeg_clients_active = 0
+        self._live_mjpeg_clients_ended = 0
+        self._live_mjpeg_frames_written = 0
+        self._live_mjpeg_last_started_at: int | None = None
+        self._live_mjpeg_last_write_at: int | None = None
+        self._live_mjpeg_last_ended_at: int | None = None
+        self._live_mjpeg_last_duration: float | None = None
+        self._live_mjpeg_last_end_reason: str | None = None
         self._live_transport_stats: dict[str, Any] = {}
         self._live_last_state_write_at = 0.0
 
@@ -141,6 +150,15 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_rotated_frames": self._live_rotated_frames,
                 "live_rotation_failures": self._live_rotation_failures,
                 "live_invalid_jpeg_frames": self._live_invalid_jpeg_frames,
+                "live_mjpeg_clients_started": self._live_mjpeg_clients_started,
+                "live_mjpeg_clients_active": self._live_mjpeg_clients_active,
+                "live_mjpeg_clients_ended": self._live_mjpeg_clients_ended,
+                "live_mjpeg_frames_written": self._live_mjpeg_frames_written,
+                "live_mjpeg_last_started_at": self._live_mjpeg_last_started_at,
+                "live_mjpeg_last_write_at": self._live_mjpeg_last_write_at,
+                "live_mjpeg_last_ended_at": self._live_mjpeg_last_ended_at,
+                "live_mjpeg_last_duration": self._live_mjpeg_last_duration,
+                "live_mjpeg_last_end_reason": self._live_mjpeg_last_end_reason,
                 "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
                 "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
                 "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
@@ -264,6 +282,14 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_frame_at = None
         self._live_last_error = None
         self._live_transport_stats = {}
+        self._live_mjpeg_clients_started += 1
+        self._live_mjpeg_clients_active += 1
+        self._live_mjpeg_frames_written = 0
+        self._live_mjpeg_last_started_at = int(time.time())
+        self._live_mjpeg_last_write_at = None
+        self._live_mjpeg_last_ended_at = None
+        self._live_mjpeg_last_duration = None
+        self._live_mjpeg_last_end_reason = None
         self._write_live_state(force=True)
 
         thread = Thread(
@@ -273,12 +299,16 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             daemon=True,
         )
         thread.start()
+        mjpeg_started_monotonic = time.monotonic()
+        end_reason = "completed"
 
         response = web.StreamResponse(
             status=200,
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Content-Encoding": "identity",
                 "Content-Type": f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY.decode('ascii')}",
             },
         )
@@ -292,10 +322,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 except TimeoutError:
                     if self._live_frames == 0:
                         self._handle_live_error("Timed out waiting for first live JPEG frame")
+                        end_reason = "first_frame_timeout"
                     else:
                         self._handle_live_error("Timed out waiting for next live JPEG frame")
+                        end_reason = "next_frame_timeout"
                         break
                     if not thread.is_alive():
+                        end_reason = "worker_stopped_before_frame"
                         break
                     continue
                 frame, frame_status, edge_crop_pixels = await self.hass.async_add_executor_job(
@@ -321,11 +354,26 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     + b"\r\n"
                 )
                 await response.drain()
-        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+                self._live_mjpeg_frames_written += 1
+                self._live_mjpeg_last_write_at = int(time.time())
+                self._write_live_state()
+        except asyncio.CancelledError:
+            end_reason = "cancelled"
+            raise
+        except (ConnectionResetError, BrokenPipeError) as err:
+            end_reason = err.__class__.__name__
+        except Exception as err:
+            end_reason = f"{err.__class__.__name__}: {err}"
             raise
         finally:
             stop_event.set()
             await self.hass.async_add_executor_job(thread.join, 2)
+            self._live_mjpeg_clients_active = max(0, self._live_mjpeg_clients_active - 1)
+            self._live_mjpeg_clients_ended += 1
+            self._live_mjpeg_last_ended_at = int(time.time())
+            self._live_mjpeg_last_duration = round(time.monotonic() - mjpeg_started_monotonic, 3)
+            self._live_mjpeg_last_end_reason = end_reason
+            self._write_live_state(force=True)
 
         return response
 

@@ -44,6 +44,11 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn('"live_rotated_frames": self._live_rotated_frames', camera_source)
         self.assertIn('"live_rotation_failures": self._live_rotation_failures', camera_source)
         self.assertIn('"live_invalid_jpeg_frames": self._live_invalid_jpeg_frames', camera_source)
+        self.assertIn('"live_mjpeg_clients_active": self._live_mjpeg_clients_active', camera_source)
+        self.assertIn('"live_mjpeg_frames_written": self._live_mjpeg_frames_written', camera_source)
+        self.assertIn('"live_mjpeg_last_end_reason": self._live_mjpeg_last_end_reason', camera_source)
+        self.assertIn('"X-Accel-Buffering": "no"', camera_source)
+        self.assertIn('"Content-Encoding": "identity"', camera_source)
         self.assertIn('"live_p2p_udp_packets": self._live_transport_stats.get("udp_packets")', camera_source)
         self.assertIn(
             '"live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams")',
