@@ -25,6 +25,7 @@ from .const import CONF_LIVE_STREAM_URL_TEMPLATE, DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
 from .helpers import redact_uid
+from .image import image_rotation_degrees, rotate_image_bytes
 
 LOGGER = logging.getLogger(__name__)
 DATA_LIVE_CAMERAS = f"{DOMAIN}_live_cameras"
@@ -197,17 +198,30 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
         if self._last_live_jpeg is not None:
             return self._last_live_jpeg
-        return await self.coordinator.async_get_latest_event_image(self.uid)
+        image = await self.coordinator.async_get_latest_event_image(self.uid)
+        if image is None:
+            return None
+        return self._rotate_jpeg(image)
 
     def _handle_live_jpeg(self, frame_queue: asyncio.Queue[bytes], frame: bytes) -> None:
         """Cache one live JPEG and queue it for the MJPEG response."""
 
+        frame = self._rotate_jpeg(frame)
         self._last_live_jpeg = frame
         self._live_frames += 1
         self._live_last_frame_at = int(time.time())
         self._live_last_error = None
         _replace_latest_frame(frame_queue, frame)
         self.async_write_ha_state()
+
+    def _rotate_jpeg(self, image: bytes) -> bytes:
+        """Apply the configured camera image rotation to JPEG bytes."""
+
+        return rotate_image_bytes(
+            image,
+            image_rotation_degrees(self.coordinator.config_entry.options),
+            self._attr_content_type,
+        )
 
     def _handle_live_error(self, message: str) -> None:
         """Store one native live stream error for diagnostics."""
