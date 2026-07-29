@@ -142,24 +142,63 @@ class LiveFrameTests(unittest.TestCase):
         self.assertTrue(packet.payload.endswith(b"\xff\xd9"))
 
     def test_live_app_media_assembler_returns_frame_on_end_fragment(self):
-        def packet(flag: int, payload: bytes) -> object:
+        def packet(flag: int, index: int, payload: bytes) -> object:
             header = bytearray(20)
             header[:4] = (8).to_bytes(4, "little")
             header[4:8] = (len(payload) + 12).to_bytes(4, "little")
             header[11] = MediaType.JPEG_FRAME
+            header[14] = index
             header[15] = flag
             header[16:20] = len(payload).to_bytes(4, "little")
             return parse_live_app_media_packet(bytes(header) + payload)
 
         assembler = LiveAppMediaAssembler()
 
-        self.assertIsNone(assembler.feed(packet(1, b"\xff\xd8")))
-        self.assertIsNone(assembler.feed(packet(0, b"body")))
-        frame = assembler.feed(packet(2, b"\xff\xd9"))
+        self.assertIsNone(assembler.feed(packet(1, 1, b"\xff\xd8")))
+        self.assertIsNone(assembler.feed(packet(0, 2, b"body")))
+        frame = assembler.feed(packet(2, 3, b"\xff\xd9"))
 
         self.assertIsNotNone(frame)
         self.assertTrue(frame.is_jpeg)
         self.assertEqual(frame.payload, b"\xff\xd8body\xff\xd9")
+
+    def test_live_app_media_assembler_ignores_duplicate_fragments(self):
+        def packet(flag: int, index: int, payload: bytes) -> object:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[14] = index
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return parse_live_app_media_packet(bytes(header) + payload)
+
+        assembler = LiveAppMediaAssembler()
+
+        self.assertIsNone(assembler.feed(packet(1, 1, b"\xff\xd8")))
+        self.assertIsNone(assembler.feed(packet(0, 2, b"body")))
+        self.assertIsNone(assembler.feed(packet(0, 2, b"duplicate")))
+        frame = assembler.feed(packet(2, 3, b"\xff\xd9"))
+
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.payload, b"\xff\xd8body\xff\xd9")
+
+    def test_live_app_media_assembler_drops_frames_with_fragment_gaps(self):
+        def packet(flag: int, index: int, payload: bytes) -> object:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[14] = index
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return parse_live_app_media_packet(bytes(header) + payload)
+
+        assembler = LiveAppMediaAssembler()
+
+        self.assertIsNone(assembler.feed(packet(1, 1, b"\xff\xd8")))
+        self.assertIsNone(assembler.feed(packet(0, 3, b"missing-index-2")))
+        self.assertIsNone(assembler.feed(packet(2, 4, b"\xff\xd9")))
 
 
 class LiveSidecarTests(unittest.TestCase):
@@ -210,11 +249,12 @@ class LiveSidecarTests(unittest.TestCase):
             self.assertEqual(g711.read_bytes(), b"audio")
 
     def test_pcap_extract_writes_jpeg_frames(self):
-        def app_payload(flag: int, payload: bytes) -> bytes:
+        def app_payload(flag: int, index: int, payload: bytes) -> bytes:
             header = bytearray(20)
             header[:4] = (8).to_bytes(4, "little")
             header[4:8] = (len(payload) + 12).to_bytes(4, "little")
             header[11] = MediaType.JPEG_FRAME
+            header[14] = index
             header[15] = flag
             header[16:20] = len(payload).to_bytes(4, "little")
             return bytes(header) + payload
@@ -225,8 +265,8 @@ class LiveSidecarTests(unittest.TestCase):
             write_raw_ip_pcap(
                 pcap,
                 [
-                    xhome_udp_kcp_datagram(app_payload(1, b"\xff\xd8")),
-                    xhome_udp_kcp_datagram(app_payload(2, b"\xff\xd9")),
+                    xhome_udp_kcp_datagram(app_payload(1, 1, b"\xff\xd8")),
+                    xhome_udp_kcp_datagram(app_payload(2, 2, b"\xff\xd9")),
                 ],
             )
             jpeg_dir = tmp_path / "jpeg"
@@ -237,11 +277,12 @@ class LiveSidecarTests(unittest.TestCase):
             self.assertEqual((jpeg_dir / "frame-000001.jpg").read_bytes(), b"\xff\xd8\xff\xd9")
 
     def test_pcap_extract_accepts_direct_lan_kcp_media_packets(self):
-        def app_payload(flag: int, payload: bytes) -> bytes:
+        def app_payload(flag: int, index: int, payload: bytes) -> bytes:
             header = bytearray(20)
             header[:4] = (8).to_bytes(4, "little")
             header[4:8] = (len(payload) + 12).to_bytes(4, "little")
             header[11] = MediaType.JPEG_FRAME
+            header[14] = index
             header[15] = flag
             header[16:20] = len(payload).to_bytes(4, "little")
             return bytes(header) + payload
@@ -252,8 +293,8 @@ class LiveSidecarTests(unittest.TestCase):
             write_raw_ip_pcap(
                 pcap,
                 [
-                    xhome_udp_kcp_datagram(app_payload(1, b"\xff\xd8"), packet_type=P2PPacketType.KCP_DATA),
-                    xhome_udp_kcp_datagram(app_payload(2, b"\xff\xd9"), packet_type=P2PPacketType.KCP_DATA),
+                    xhome_udp_kcp_datagram(app_payload(1, 1, b"\xff\xd8"), packet_type=P2PPacketType.KCP_DATA),
+                    xhome_udp_kcp_datagram(app_payload(2, 2, b"\xff\xd9"), packet_type=P2PPacketType.KCP_DATA),
                 ],
             )
             jpeg_dir = tmp_path / "jpeg"

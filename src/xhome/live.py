@@ -274,6 +274,8 @@ class LiveAppMediaAssembler:
     def __init__(self) -> None:
         self._media_type: MediaType | None = None
         self._chunks = bytearray()
+        self._last_fragment_index: int | None = None
+        self._seen_fragment_indexes: set[int] = set()
 
     def feed(self, packet: LiveAppMediaPacket) -> LiveAppMediaFrame | None:
         """Feed one parsed packet and return a frame when an end fragment arrives."""
@@ -281,20 +283,40 @@ class LiveAppMediaAssembler:
         if packet.starts_frame:
             self._media_type = packet.media_type
             self._chunks = bytearray(packet.payload)
+            self._last_fragment_index = packet.fragment_index
+            self._seen_fragment_indexes = {packet.fragment_index}
             return None
         if self._media_type is None:
             return None
         if packet.media_type != self._media_type:
-            self._media_type = packet.media_type
-            self._chunks = bytearray(packet.payload)
+            self._reset()
             return None
+        if self._is_duplicate_or_stale(packet):
+            return None
+        if self._last_fragment_index is not None and packet.fragment_index > self._last_fragment_index + 1:
+            self._reset()
+            return None
+        self._seen_fragment_indexes.add(packet.fragment_index)
+        self._last_fragment_index = packet.fragment_index
         self._chunks.extend(packet.payload)
         if packet.ends_frame:
             frame = LiveAppMediaFrame(media_type=packet.media_type, payload=bytes(self._chunks))
-            self._media_type = None
-            self._chunks = bytearray()
+            self._reset()
             return frame
         return None
+
+    def _is_duplicate_or_stale(self, packet: LiveAppMediaPacket) -> bool:
+        """Return whether a fragment has already been assembled for this frame."""
+
+        return packet.fragment_index in self._seen_fragment_indexes
+
+    def _reset(self) -> None:
+        """Reset current frame assembly state."""
+
+        self._media_type = None
+        self._chunks = bytearray()
+        self._last_fragment_index = None
+        self._seen_fragment_indexes = set()
 
 
 def callback_to_media_frame(callback: LiveCallback, *, header_bytes: int = MEDIA_HEADER_BYTES) -> MediaFrame | None:
