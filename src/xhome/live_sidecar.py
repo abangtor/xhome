@@ -121,8 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     mjpeg.add_argument("--path", default="/xhome.mjpeg")
     mjpeg.add_argument("--duration", type=float, default=3600.0, help="Maximum native session duration in seconds")
     mjpeg.add_argument("--timeout", type=float, default=10.0)
-    mjpeg.add_argument("--relay-only", action="store_true", default=True)
-    mjpeg.add_argument("--direct-punch", action="store_false", dest="relay_only")
+    mjpeg.add_argument("--relay-only", action="store_true", help="Skip direct local/public punch packets")
+    mjpeg.add_argument("--direct-punch", action="store_false", dest="relay_only", help=argparse.SUPPRESS)
     mjpeg.add_argument("--jpeg-dir", type=Path, help="Optional debug copy of served JPEG frames")
     mjpeg.add_argument(
         "--insecure-skip-verify",

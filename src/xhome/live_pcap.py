@@ -17,6 +17,11 @@ PCAP_RECORD_HEADER_BYTES = 16
 IPV4_UDP_PROTOCOL = 17
 KCP_HEADER_BYTES = 24
 KCP_PUSH_COMMAND = 81
+MEDIA_PACKET_TYPES = {
+    P2PPacketType.KCP_DATA,
+    P2PPacketType.DIRECT_KCP_DATA,
+    P2PPacketType.RELAY_KCP_DATA,
+}
 
 
 @dataclass(frozen=True)
@@ -183,10 +188,10 @@ def parse_kcp_segment(data: bytes) -> KcpSegment:
 
 
 def iter_pcap_kcp_app_payloads(path: Path) -> Iterator[bytes]:
-    """Yield command-8 app-media payloads from relay KCP media packets."""
+    """Yield command-8 app-media payloads from KCP media packets."""
 
     for _datagram, packet in iter_xhome_udp_packets(path):
-        if packet.packet_type != P2PPacketType.RELAY_KCP_DATA or packet.channel != MEDIA_CHANNEL:
+        if packet.packet_type not in MEDIA_PACKET_TYPES or packet.channel != MEDIA_CHANNEL:
             continue
         try:
             segment = parse_kcp_segment(packet.payload)
@@ -214,7 +219,7 @@ def extract_pcap_media(
         for _datagram, packet in iter_xhome_udp_packets(path):
             stats.udp_datagrams += 1
             stats.xhome_packets += 1
-            if packet.packet_type != P2PPacketType.RELAY_KCP_DATA or packet.channel != MEDIA_CHANNEL:
+            if packet.packet_type not in MEDIA_PACKET_TYPES or packet.channel != MEDIA_CHANNEL:
                 continue
             try:
                 segment = parse_kcp_segment(packet.payload)

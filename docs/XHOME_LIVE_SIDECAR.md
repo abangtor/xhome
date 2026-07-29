@@ -13,10 +13,10 @@ This sidecar layer reimplements the transport in portable Python.
 
 The implemented Python path currently covers steps 1-5, passive KCP media
 receive/ACK handling, live media dumps, and offline media extraction from
-successful app PCAPs. A relay-only live probe has successfully received JPEG
-frames from the USA relay path. The remaining product gap is turning those
-payloads into a continuously served Home Assistant stream URL instead of debug
-files.
+successful app PCAPs. Captures have shown both relay-shaped and direct-LAN KCP
+media paths carrying JPEG frames. The remaining product gap is hardening that
+receive path into a continuously served Home Assistant stream URL instead of
+debug files.
 
 ## Portable Cloud Probe
 
@@ -59,10 +59,9 @@ type-15 relay-info packets, answers type-11 peer handshakes with type-12
 responses, sends the app's repeated four-packet type-18/channel-4 relay touch
 bursts, and reports any type-13/18/19 KCP data packets it sees.
 
-Add `--relay-only` when the client and device are behind a path where the
-direct local/public punches derail media. In the known successful Home
-Assistant-side test, relay-only mode was required even though the relay reported
-`Online:"0"`.
+Add `--relay-only` only when the client and device are behind a path where the
+direct local/public punches derail media. Official app captures on the same LAN
+use direct packet type `13` media from the door to the phone.
 
 Add `--kcp-start` to the rendezvous probe to actively send command `20` through
 the recovered KCP path. The native TLS session is kept open while UDP rendezvous
@@ -74,7 +73,6 @@ python -m xhome.live_sidecar cloud-probe \
   --region usa \
   --send-start \
   --p2p-rendezvous \
-  --relay-only \
   --jpeg-dir /tmp/xhome-live-jpegs \
   --h264-out /tmp/xhome-live.h264 \
   --g711-out /tmp/xhome-live.g711 \
@@ -147,9 +145,9 @@ URL such as:
 http://SIDECAR_HOST:8088/xhome.mjpeg
 ```
 
-`mjpeg-server` defaults to relay-only mode, matching the first successful live
-test from the Home Assistant side. Use `--direct-punch` only when testing local
-or public peer candidates deliberately.
+`mjpeg-server` attempts direct local/public punching by default, matching the
+official app's same-LAN live-view capture. Add `--relay-only` to force the
+older relay-only behavior while troubleshooting.
 
 ## Callback Capture Format
 

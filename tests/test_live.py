@@ -218,6 +218,33 @@ class LiveSidecarTests(unittest.TestCase):
             self.assertEqual(stats.jpeg_frames, 1)
             self.assertEqual((jpeg_dir / "frame-000001.jpg").read_bytes(), b"\xff\xd8\xff\xd9")
 
+    def test_pcap_extract_accepts_direct_lan_kcp_media_packets(self):
+        def app_payload(flag: int, payload: bytes) -> bytes:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return bytes(header) + payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pcap = tmp_path / "sample.pcap"
+            write_raw_ip_pcap(
+                pcap,
+                [
+                    xhome_udp_kcp_datagram(app_payload(1, b"\xff\xd8"), packet_type=P2PPacketType.KCP_DATA),
+                    xhome_udp_kcp_datagram(app_payload(2, b"\xff\xd9"), packet_type=P2PPacketType.KCP_DATA),
+                ],
+            )
+            jpeg_dir = tmp_path / "jpeg"
+
+            stats = extract_pcap_media(pcap, jpeg_dir=jpeg_dir)
+
+            self.assertEqual(stats.jpeg_frames, 1)
+            self.assertEqual((jpeg_dir / "frame-000001.jpg").read_bytes(), b"\xff\xd8\xff\xd9")
+
     def test_cloud_probe_can_fetch_live_token_when_token_is_omitted(self):
         args = build_parser().parse_args(
             [
@@ -234,6 +261,36 @@ class LiveSidecarTests(unittest.TestCase):
 
         self.assertIsNone(args.token)
         self.assertEqual(args.region, "usa")
+
+    def test_mjpeg_server_uses_direct_punch_by_default(self):
+        args = build_parser().parse_args(
+            [
+                "mjpeg-server",
+                "--uid",
+                "LSV212PFJU5TQT42R3UX",
+                "--token",
+                "token",
+                "--native-iot-host",
+                "usaiotd.lancens.com",
+            ]
+        )
+
+        self.assertFalse(args.relay_only)
+
+        relay_only = build_parser().parse_args(
+            [
+                "mjpeg-server",
+                "--uid",
+                "LSV212PFJU5TQT42R3UX",
+                "--token",
+                "token",
+                "--native-iot-host",
+                "usaiotd.lancens.com",
+                "--relay-only",
+            ]
+        )
+
+        self.assertTrue(relay_only.relay_only)
 
     def test_latest_jpeg_buffer_returns_new_frame_once(self):
         frames = LatestJpegBuffer()
@@ -449,7 +506,11 @@ class LiveKcpTests(unittest.TestCase):
         self.assertEqual(strip_uid_suffix(b"abc", "LSV"), b"abc")
 
 
-def xhome_udp_kcp_datagram(app_payload: bytes) -> bytes:
+def xhome_udp_kcp_datagram(
+    app_payload: bytes,
+    *,
+    packet_type: P2PPacketType = P2PPacketType.RELAY_KCP_DATA,
+) -> bytes:
     kcp = (
         MEDIA_CONV_ID.to_bytes(4, "little")
         + bytes([81, 0])
@@ -460,7 +521,7 @@ def xhome_udp_kcp_datagram(app_payload: bytes) -> bytes:
         + len(app_payload).to_bytes(4, "little")
         + app_payload
     )
-    return encode_udp_packet(P2PPacketType.RELAY_KCP_DATA, kcp, channel=2)
+    return encode_udp_packet(packet_type, kcp, channel=2)
 
 
 def write_raw_ip_pcap(path: Path, udp_payloads: list[bytes]) -> None:
