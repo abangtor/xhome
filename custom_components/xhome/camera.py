@@ -181,6 +181,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     if not thread.is_alive():
                         break
                     continue
+                frame = self._rotate_jpeg(frame)
                 await response.write(
                     b"--"
                     + MJPEG_BOUNDARY
@@ -202,7 +203,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         """Return the latest live JPEG, falling back to latest event image."""
 
         if self._last_live_jpeg is not None:
-            return self._last_live_jpeg
+            return self._rotate_jpeg(self._last_live_jpeg)
         image = await self.coordinator.async_get_latest_event_image(self.uid)
         if image is None:
             return None
@@ -211,7 +212,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
     def _handle_live_jpeg(self, frame_queue: asyncio.Queue[bytes], frame: bytes) -> None:
         """Cache one live JPEG and queue it for the MJPEG response."""
 
-        frame = self._rotate_jpeg(frame)
         self._last_live_jpeg = frame
         self._live_frames += 1
         self._live_last_frame_at = int(time.time())
