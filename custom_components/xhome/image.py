@@ -17,6 +17,9 @@ from .coordinator import XHomeDataUpdateCoordinator, XHomeLatestEventMedia
 from .entity import XHomeEntity
 
 LOGGER = logging.getLogger(__name__)
+JPEG_EOI = b"\xff\xd9"
+JPEG_MARKER_PREFIX = b"\xff"
+JPEG_SOI = b"\xff\xd8"
 
 
 async def async_setup_entry(
@@ -137,13 +140,12 @@ def rotate_image_bytes(image_bytes: bytes, rotation: int, content_type: str) -> 
         return image_bytes
 
     try:
-        from PIL import Image, ImageFile, ImageOps
+        from PIL import Image, ImageOps
     except ImportError:
         LOGGER.warning("Pillow is not installed; returning unrotated XHome latest event image")
         return image_bytes
 
-    load_truncated_images = ImageFile.LOAD_TRUNCATED_IMAGES
-    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    image_bytes = _complete_jpeg_bytes(image_bytes)
     try:
         with Image.open(BytesIO(image_bytes)) as source:
             image = ImageOps.exif_transpose(source)
@@ -162,8 +164,6 @@ def rotate_image_bytes(image_bytes: bytes, rotation: int, content_type: str) -> 
     except Exception as err:  # noqa: BLE001
         LOGGER.debug("XHome latest event image rotation failed: %s", err)
         return image_bytes
-    finally:
-        ImageFile.LOAD_TRUNCATED_IMAGES = load_truncated_images
 
 
 def _image_format(image: Any, content_type: str) -> str:
@@ -176,3 +176,13 @@ def _image_format(image: Any, content_type: str) -> str:
     if content_type == "image/webp":
         return "WEBP"
     return "JPEG"
+
+
+def _complete_jpeg_bytes(image_bytes: bytes) -> bytes:
+    """Append a missing JPEG EOI marker emitted by XHome live MJPEG frames."""
+
+    if not image_bytes.startswith(JPEG_SOI) or image_bytes.endswith(JPEG_EOI):
+        return image_bytes
+    if image_bytes.endswith(JPEG_MARKER_PREFIX):
+        return image_bytes + JPEG_EOI[1:]
+    return image_bytes + JPEG_EOI
