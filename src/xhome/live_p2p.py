@@ -358,7 +358,11 @@ class XHomeP2PRendezvousProbe:
             local_ips = self.local_ips or best_effort_local_ips()
             local_port = sock.getsockname()[1]
             port_token = str(local_port)
-            connect_payload = build_client_connect_payload_for_ips(uid=self.uid, local_ips=local_ips, local_port=local_port)
+            connect_payload = build_client_connect_payload_for_ips(
+                uid=self.uid,
+                local_ips=local_ips,
+                local_port=local_port,
+            )
             relay_info_payload = build_uid_payload(uid=self.uid, include_key=True)
             heartbeat_payload = build_uid_payload(uid=self.uid)
             packets: list[UdpPacket] = []
@@ -367,6 +371,7 @@ class XHomeP2PRendezvousProbe:
             candidates: dict[tuple[str, int, P2PAddressKind], P2PAddress] = {}
             selected_peer: tuple[str, int] | None = None
             ready_notified = False
+            loop_ticks = 0
             sent_counts: dict[str, int] = {
                 "relay_touch": 0,
                 "client_connect": 0,
@@ -377,6 +382,29 @@ class XHomeP2PRendezvousProbe:
                 "heartbeat": 0,
                 "kcp_start": 0,
             }
+
+            def probe_stats() -> dict[str, Any]:
+                stats = media_probe.as_dict()
+                stats.update(
+                    {
+                        "candidate_count": len(candidates),
+                        "local_port": local_port,
+                        "loop_ticks": loop_ticks,
+                        "packets": len(packets),
+                        "selected_peer": (
+                            {"host": selected_peer[0], "port": selected_peer[1]} if selected_peer else None
+                        ),
+                        "sent": dict(sent_counts),
+                    }
+                )
+                return stats
+
+            def emit_probe_stats(stats: dict[str, Any]) -> None:
+                if on_stats is not None:
+                    merged = probe_stats()
+                    merged.update(stats)
+                    on_stats(merged)
+
             kcp_probe = KcpStartProbe(uid=self.uid, sock=sock, start_command=kcp_start_command)
             media_probe = KcpMediaProbe(
                 uid=self.uid,
@@ -385,12 +413,13 @@ class XHomeP2PRendezvousProbe:
                 g711_out=g711_out,
                 jpeg_dir=jpeg_dir,
                 on_frame=on_frame,
-                on_stats=on_stats,
+                on_stats=emit_probe_stats,
             )
             next_kcp_start = 0.0
             next_discovery = 0.0
             next_relay_touch = 0.0
             next_heartbeat = 0.0
+            next_stats = 0.0
 
             for relay in self.relays:
                 sock.sendto(encode_udp_packet(P2PPacketType.RELAY_TOUCH), relay)
@@ -399,6 +428,7 @@ class XHomeP2PRendezvousProbe:
             try:
                 deadline = time.monotonic() + duration
                 while time.monotonic() < deadline and (stop_event is None or not stop_event.is_set()):
+                    loop_ticks += 1
                     now = time.monotonic()
                     if selected_peer is None and now >= next_discovery:
                         for relay in self.relays:
@@ -408,7 +438,10 @@ class XHomeP2PRendezvousProbe:
                         for candidate in list(candidates.values()):
                             if self.direct_punch_enabled and candidate.kind != P2PAddressKind.RELAY:
                                 punch_payload = build_peer_punch_payload(uid=self.uid, address_kind=candidate.kind)
-                                sock.sendto(encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload), candidate.address)
+                                sock.sendto(
+                                    encode_udp_packet(P2PPacketType.DIRECT_PUNCH, punch_payload),
+                                    candidate.address,
+                                )
                                 sent_counts["direct_punch"] += 1
                         next_discovery = now + interval
 
@@ -417,7 +450,10 @@ class XHomeP2PRendezvousProbe:
                     ]
                     if relay_candidates and now >= next_relay_touch:
                         for candidate in relay_candidates:
-                            sock.sendto(encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload), candidate.address)
+                            sock.sendto(
+                                encode_udp_packet(P2PPacketType.RELAY_INFO, relay_info_payload),
+                                candidate.address,
+                            )
                             sent_counts["relay_info"] += 1
                             for _ in range(relay_touch_burst_size):
                                 sock.sendto(
@@ -448,7 +484,12 @@ class XHomeP2PRendezvousProbe:
                             sent_counts["heartbeat"] += 1
                         next_heartbeat = now + 3.0
 
-                    for received, addr in read_udp_available_with_addresses(sock, timeout=self.timeout):
+                    for received, addr in read_udp_available_with_addresses(
+                        sock,
+                        timeout=self.timeout,
+                        max_duration=interval,
+                        max_packets=64,
+                    ):
                         packets.append(received)
                         media_probe.receive_packet(received, addr)
                         kcp_probe.receive_packet(received, addr)
@@ -476,6 +517,9 @@ class XHomeP2PRendezvousProbe:
                             if on_ready is not None and not ready_notified:
                                 on_ready()
                                 ready_notified = True
+                    if on_stats is not None and now >= next_stats:
+                        on_stats(probe_stats())
+                        next_stats = now + 2.0
                     time.sleep(interval)
 
                 return {
@@ -488,7 +532,7 @@ class XHomeP2PRendezvousProbe:
                     "selected_peer": {"host": selected_peer[0], "port": selected_peer[1]} if selected_peer else None,
                     "candidates": [candidate.as_dict() for candidate in candidates.values()],
                     "client_connect_responses": [response.as_dict() for response in responses],
-                    "media_probe": media_probe.as_dict(),
+                    "media_probe": probe_stats(),
                     "kcp_start_probe": kcp_probe.as_dict(),
                     "packet_type_counts": packet_type_counts(packets),
                     "packets": [packet_summary(packet) for packet in packets[:10]],
@@ -633,12 +677,17 @@ class KcpMediaProbe:
         self.error: str | None = None
         self.paths: dict[tuple[str, int, int, str], Any] = {}
         self.assembler = LiveAppMediaAssembler()
+        self.udp_packets = 0
         self.kcp_payloads = 0
         self.app_packets = 0
         self.frames = 0
         self.h264_frames = 0
         self.g711_frames = 0
         self.jpeg_frames = 0
+        self.last_packet_at: int | None = None
+        self.last_kcp_packet_at: int | None = None
+        self.last_payload_at: int | None = None
+        self.last_frame_at: int | None = None
         self.first_payloads: list[dict[str, Any]] = []
         self._last_stats_frame_count = -1
         self._last_stats_payload_bucket = -1
@@ -654,12 +703,16 @@ class KcpMediaProbe:
     def receive_packet(self, packet: UdpPacket, addr: tuple[str, int]) -> None:
         if self.error is not None:
             return
+        now = int(time.time())
+        self.udp_packets += 1
+        self.last_packet_at = now
         if packet.packet_type not in {
             P2PPacketType.KCP_DATA,
             P2PPacketType.DIRECT_KCP_DATA,
             P2PPacketType.RELAY_KCP_DATA,
         }:
             return
+        self.last_kcp_packet_at = now
         try:
             channels = self._channels_for_addr(addr, int(packet.packet_type))
             for channel in channels:
@@ -681,12 +734,17 @@ class KcpMediaProbe:
                 {"host": host, "port": port, "packet_type": packet_type, "mode": mode}
                 for host, port, packet_type, mode in self.paths
             ],
+            "udp_packets": self.udp_packets,
             "kcp_payloads": self.kcp_payloads,
             "app_packets": self.app_packets,
             "frames": self.frames,
             "h264_frames": self.h264_frames,
             "g711_frames": self.g711_frames,
             "jpeg_frames": self.jpeg_frames,
+            "last_packet_at": self.last_packet_at,
+            "last_kcp_packet_at": self.last_kcp_packet_at,
+            "last_payload_at": self.last_payload_at,
+            "last_frame_at": self.last_frame_at,
             "first_payloads": self.first_payloads[:10],
         }
 
@@ -722,10 +780,12 @@ class KcpMediaProbe:
         except ValueError:
             return
         self.app_packets += 1
+        self.last_payload_at = int(time.time())
         frame = self.assembler.feed(packet)
         if frame is None:
             return
         self.frames += 1
+        self.last_frame_at = int(time.time())
         if self.on_frame is not None:
             self.on_frame(frame)
         if frame.media_type in {MediaType.H264_I_FRAME, MediaType.H264_P_FRAME, MediaType.H264_B_FRAME}:
@@ -791,11 +851,16 @@ def read_udp_available(sock: socket.socket, *, timeout: float) -> list[UdpPacket
 
 
 def read_udp_available_with_addresses(
-    sock: socket.socket, *, timeout: float
+    sock: socket.socket,
+    *,
+    timeout: float,
+    max_duration: float | None = None,
+    max_packets: int | None = None,
 ) -> list[tuple[UdpPacket, tuple[str, int]]]:
     """Read UDP packets and source addresses until one timeout window has no data."""
 
     packets: list[tuple[UdpPacket, tuple[str, int]]] = []
+    started_at = time.monotonic()
     old_timeout = sock.gettimeout()
     sock.settimeout(timeout)
     try:
@@ -807,6 +872,10 @@ def read_udp_available_with_addresses(
             except socket.timeout:
                 return packets
             packets.append((decode_udp_packet(data), addr))
+            if max_packets is not None and len(packets) >= max_packets:
+                return packets
+            if max_duration is not None and time.monotonic() - started_at >= max_duration:
+                return packets
     finally:
         sock.settimeout(old_timeout)
 

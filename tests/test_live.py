@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import socket
 import ssl
 import tempfile
 import unittest
@@ -32,6 +33,7 @@ from xhome.live_p2p import (
     encode_kcp_udp_packet,
     encode_udp_packet,
     parse_client_connect_responses,
+    read_udp_available_with_addresses,
 )
 from xhome.live_pcap import extract_pcap_media
 from xhome.live_sidecar import (
@@ -540,6 +542,20 @@ class LiveTransportTests(unittest.TestCase):
 
         self.assertEqual(relays, [("8.222.151.25", 9729), ("8.222.151.26", 9729)])
 
+    def test_udp_reader_limits_packet_batch_to_avoid_keepalive_starvation(self):
+        sock = FakeUdpSocket(
+            [
+                encode_udp_packet(P2PPacketType.HEARTBEAT, b"one"),
+                encode_udp_packet(P2PPacketType.HEARTBEAT, b"two"),
+                encode_udp_packet(P2PPacketType.HEARTBEAT, b"three"),
+            ]
+        )
+
+        packets = read_udp_available_with_addresses(sock, timeout=0.2, max_packets=2)
+
+        self.assertEqual([packet.payload for packet, _addr in packets], [b"one", b"two"])
+        self.assertEqual(len(sock.datagrams), 1)
+
 
 class FakeKCP:
     def __init__(self, conv_id, identity_token):
@@ -581,6 +597,23 @@ class FakeSocket:
         chunk = self.data[:size]
         del self.data[:size]
         return bytes(chunk)
+
+    def gettimeout(self):
+        return self.timeout
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+
+class FakeUdpSocket:
+    def __init__(self, datagrams: list[bytes]) -> None:
+        self.datagrams = list(datagrams)
+        self.timeout = None
+
+    def recvfrom(self, _size: int) -> tuple[bytes, tuple[str, int]]:
+        if not self.datagrams:
+            raise socket.timeout
+        return self.datagrams.pop(0), ("127.0.0.1", 12345)
 
     def gettimeout(self):
         return self.timeout

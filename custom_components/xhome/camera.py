@@ -112,6 +112,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
         attrs = super().extra_state_attributes
         data = self.device_data
+        sent = self._live_transport_stats.get("sent") or {}
+        selected_peer = self._live_transport_stats.get("selected_peer") or {}
         attrs.update(
             {
                 "embedded_live_stream": True,
@@ -128,10 +130,22 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_rotated_frames": self._live_rotated_frames,
                 "live_rotation_failures": self._live_rotation_failures,
                 "live_invalid_jpeg_frames": self._live_invalid_jpeg_frames,
+                "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
                 "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
                 "live_app_packets": self._live_transport_stats.get("app_packets"),
                 "live_p2p_frames": self._live_transport_stats.get("frames"),
                 "live_p2p_jpeg_frames": self._live_transport_stats.get("jpeg_frames"),
+                "live_p2p_packets": self._live_transport_stats.get("packets"),
+                "live_p2p_candidate_count": self._live_transport_stats.get("candidate_count"),
+                "live_p2p_loop_ticks": self._live_transport_stats.get("loop_ticks"),
+                "live_p2p_selected_peer": _peer_label(selected_peer),
+                "live_p2p_sent_heartbeats": sent.get("heartbeat"),
+                "live_p2p_sent_relay_info": sent.get("relay_info"),
+                "live_p2p_sent_relay_touches": sent.get("relay_touch_channel4"),
+                "live_p2p_last_packet_at": self._live_transport_stats.get("last_packet_at"),
+                "live_p2p_last_kcp_packet_at": self._live_transport_stats.get("last_kcp_packet_at"),
+                "live_p2p_last_payload_at": self._live_transport_stats.get("last_payload_at"),
+                "live_p2p_last_probe_frame_at": self._live_transport_stats.get("last_frame_at"),
                 "live_media_probe_error": self._live_transport_stats.get("error"),
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
@@ -373,6 +387,14 @@ def _native_mjpeg_url(hass: HomeAssistant, entry_id: str, uid: str, token: str) 
     """Return an absolute internal MJPEG URL for Home Assistant's stream worker."""
 
     return f"{get_url(hass, prefer_external=False)}/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
+
+
+def _peer_label(peer: Any) -> str | None:
+    """Return a compact peer label for live P2P diagnostics."""
+
+    if not isinstance(peer, dict) or "host" not in peer or "port" not in peer:
+        return None
+    return f"{peer['host']}:{peer['port']}"
 
 
 def _run_native_mjpeg_worker(
