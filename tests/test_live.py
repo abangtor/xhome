@@ -51,6 +51,7 @@ from xhome.live_transport import (
     LIVE_LOGIN_COMMAND,
     XHomeLiveCloudTransport,
     decode_native_frame_header,
+    encode_device_setting_payload,
     encode_native_frame,
     extract_p2p_servers,
     make_ssl_context,
@@ -116,6 +117,8 @@ class LiveFrameTests(unittest.TestCase):
         self.assertEqual(ControlCommand.GET_RESOLUTION_REQ, 138)
         self.assertEqual(ControlCommand.GET_DEVICE_STATUS_REQ, 152)
         self.assertEqual(ControlCommand.GET_DEVICE_RSSI_REQ, 154)
+        self.assertEqual(ControlCommand.DEVICE_SETTING_COMB_CMD, 1000)
+        self.assertEqual(ControlCommand.DEVICE_SET_CMD_GET_DEVICE_ROTATE_REQ, 212)
 
     def test_parse_live_app_media_packet(self):
         header = bytearray(20)
@@ -382,6 +385,17 @@ class LiveTransportTests(unittest.TestCase):
 
         self.assertEqual(command, 10001)
         self.assertEqual(payload_len, len(payload))
+        self.assertEqual(frame[8:], payload)
+
+    def test_native_device_setting_frame_codec(self):
+        payload = encode_device_setting_payload(ControlCommand.DEVICE_SET_CMD_GET_DEVICE_ROTATE_REQ)
+        frame = encode_native_frame(ControlCommand.DEVICE_SETTING_COMB_CMD, payload)
+
+        command, payload_len = decode_native_frame_header(frame[:8])
+
+        self.assertEqual(payload, b"\xd4\x00\x00\x00\x00\x00\x00\x00")
+        self.assertEqual(command, 1000)
+        self.assertEqual(payload_len, 8)
         self.assertEqual(frame[8:], payload)
 
     def test_native_tls_context_is_app_compatible(self):

@@ -20,7 +20,7 @@ from homeassistant.helpers.network import get_url
 
 from .api.live import ControlCommand, LiveAppMediaFrame, LiveSessionMetadata, MediaType
 from .api.live_p2p import XHomeP2PRendezvousProbe
-from .api.live_transport import XHomeLiveCloudTransport, extract_p2p_servers
+from .api.live_transport import XHomeLiveCloudTransport, encode_device_setting_payload, extract_p2p_servers
 from .const import DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
@@ -45,6 +45,9 @@ NATIVE_CONTROL_POST_START_STATUS_COMMANDS = (
     ControlCommand.GET_BATTERY_LEVEL_REQ,
     ControlCommand.GET_DEVICE_RSSI_REQ,
     ControlCommand.GET_RESOLUTION_REQ,
+)
+NATIVE_CONTROL_POST_START_DEVICE_COMMANDS = (
+    ControlCommand.DEVICE_SET_CMD_GET_DEVICE_ROTATE_REQ,
 )
 
 
@@ -174,9 +177,15 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_native_control_status_probes": self._live_transport_stats.get(
                     "native_control_status_probes"
                 ),
+                "live_native_control_device_setting_probes": self._live_transport_stats.get(
+                    "native_control_device_setting_probes"
+                ),
                 "live_native_control_frames": self._live_transport_stats.get("native_control_frames"),
                 "live_native_control_last_command": self._live_transport_stats.get(
                     "native_control_last_command"
+                ),
+                "live_native_control_last_device_setting_command": self._live_transport_stats.get(
+                    "native_control_last_device_setting_command"
                 ),
                 "live_native_control_last_sent_at": self._live_transport_stats.get("native_control_last_sent_at"),
                 "live_native_control_last_read_at": self._live_transport_stats.get("native_control_last_read_at"),
@@ -508,8 +517,10 @@ class _NativeLiveControlKeeper:
         self._start_refreshes = 0
         self._keepalives = 0
         self._status_probes = 0
+        self._device_setting_probes = 0
         self._frames = 0
         self._last_command: int | None = None
+        self._last_device_setting_command: int | None = None
         self._last_sent_at: int | None = None
         self._last_read_at: int | None = None
         self._last_error: str | None = None
@@ -522,6 +533,7 @@ class _NativeLiveControlKeeper:
         self._first_frame_refresh_sent = True
         self._send_start_refresh()
         self._send_post_start_status_probes()
+        self._send_post_start_device_setting_probes()
         self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
 
     def tick(self) -> None:
@@ -541,8 +553,10 @@ class _NativeLiveControlKeeper:
             "native_control_start_refreshes": self._start_refreshes,
             "native_control_keepalives": self._keepalives,
             "native_control_status_probes": self._status_probes,
+            "native_control_device_setting_probes": self._device_setting_probes,
             "native_control_frames": self._frames,
             "native_control_last_command": self._last_command,
+            "native_control_last_device_setting_command": self._last_device_setting_command,
             "native_control_last_sent_at": self._last_sent_at,
             "native_control_last_read_at": self._last_read_at,
             "native_control_last_error": self._last_error,
@@ -559,14 +573,22 @@ class _NativeLiveControlKeeper:
                 self._status_probes += 1
         self._read_pending()
 
+    def _send_post_start_device_setting_probes(self) -> None:
+        for command in NATIVE_CONTROL_POST_START_DEVICE_COMMANDS:
+            payload = encode_device_setting_payload(command)
+            if self._send_control_frame(ControlCommand.DEVICE_SETTING_COMB_CMD, payload):
+                self._device_setting_probes += 1
+                self._last_device_setting_command = int(command)
+        self._read_pending()
+
     def _send_keepalive(self) -> None:
         if self._send_control_frame(ControlCommand.GET_BATTERY_LEVEL_REQ):
             self._keepalives += 1
         self._read_pending()
 
-    def _send_control_frame(self, command: int) -> bool:
+    def _send_control_frame(self, command: int, payload: bytes = b"") -> bool:
         try:
-            self._transport.send_frame(command)
+            self._transport.send_frame(command, payload)
         except Exception as err:  # noqa: BLE001
             self._last_error = str(err)
             return False

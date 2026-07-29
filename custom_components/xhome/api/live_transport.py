@@ -49,6 +49,20 @@ def encode_native_frame(command: int, payload: bytes = b"") -> bytes:
     return command.to_bytes(2, "little") + b"\x00\x00" + len(payload).to_bytes(4, "little") + payload
 
 
+def encode_device_setting_payload(command: int, payload: bytes = b"") -> bytes:
+    """Encode the inner payload used by native command ``1000``.
+
+    This mirrors the Android app's ``C3712m`` command wrapper: a little-endian
+    uint32 command, uint32 payload length, then optional payload bytes.
+    """
+
+    if command < 0 or command > 0xFFFFFFFF:
+        raise ValueError(f"Device setting command out of uint32 range: {command}")
+    if len(payload) > 0xFFFFFFFF:
+        raise ValueError("Device setting payload is too large")
+    return command.to_bytes(4, "little") + len(payload).to_bytes(4, "little") + payload
+
+
 def decode_native_frame_header(header: bytes) -> tuple[int, int]:
     """Decode one native TLS frame header."""
 
