@@ -10,7 +10,7 @@ from threading import Event, Thread
 from typing import Any
 
 from aiohttp import web
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import Camera
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -65,7 +65,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
     _attr_translation_key = "live_camera"
     _attr_should_poll = False
     _attr_content_type = "image/jpeg"
-    _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_frame_interval = 0.2
 
     def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
         """Initialize the live camera entity."""
