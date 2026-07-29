@@ -24,6 +24,7 @@ from xhome.live_p2p import (
     P2PAddressKind,
     P2PPacketType,
     build_client_connect_payload,
+    build_direct_touch_payload,
     build_peer_punch_payload,
     build_peer_punch_response_payload,
     build_relay_touch_nonce,
@@ -472,6 +473,11 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(nonce[:4], (1_785_236_585).to_bytes(4, "little"))
         self.assertEqual(nonce[4:], (607_005).to_bytes(4, "little"))
 
+    def test_direct_touch_payload_is_eight_byte_nonce_without_uid_suffix(self):
+        payload = build_direct_touch_payload(nonce=b"12345678")
+
+        self.assertEqual(payload, b"12345678")
+
     def test_kcp_udp_packet_appends_uid_for_direct_relay_mode(self):
         packet = decode_udp_packet(
             encode_kcp_udp_packet(
@@ -485,6 +491,19 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
         self.assertEqual(packet.channel, 2)
         self.assertEqual(packet.payload, b"kcpLSV212PFJU5TQT42R3UX")
+
+    def test_direct_touch_uses_raw_channel_four_without_uid_suffix(self):
+        packet = decode_udp_packet(
+            encode_udp_packet(
+                P2PPacketType.KCP_DATA,
+                build_direct_touch_payload(nonce=b"12345678"),
+                channel=4,
+            )
+        )
+
+        self.assertEqual(packet.packet_type, P2PPacketType.KCP_DATA)
+        self.assertEqual(packet.channel, 4)
+        self.assertEqual(packet.payload, b"12345678")
 
     def test_kcp_channel_uses_logical_channel_in_udp_envelope(self):
         sent = []

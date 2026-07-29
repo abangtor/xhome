@@ -55,6 +55,7 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("live_last_error", camera_source)
         self.assertIn("Timed out waiting for next live JPEG frame", camera_source)
         self.assertIn("live_p2p_sent_heartbeats", camera_source)
+        self.assertIn("live_p2p_sent_direct_touches", camera_source)
         self.assertIn("live_p2p_last_packet_at", camera_source)
         self.assertIn("live_p2p_selected_peer", camera_source)
         self.assertNotIn("render_live_stream_url", camera_source)

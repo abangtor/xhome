@@ -219,6 +219,15 @@ def build_relay_touch_nonce(*, now: float | None = None, tick: int | None = None
     )
 
 
+def build_direct_touch_payload(*, nonce: bytes | None = None, now: float | None = None) -> bytes:
+    """Build the eight-byte direct-LAN channel-4 touch payload."""
+
+    nonce = nonce or build_relay_touch_nonce(now=now)
+    if len(nonce) != 8:
+        raise ValueError("Direct touch nonce must be exactly 8 bytes")
+    return nonce
+
+
 def build_relay_touch_payload(*, uid: str, nonce: bytes | None = None, now: float | None = None) -> bytes:
     """Build the short channel-4 relay touch payload seen in the Android app.
 
@@ -376,6 +385,7 @@ class XHomeP2PRendezvousProbe:
                 "relay_touch": 0,
                 "client_connect": 0,
                 "direct_punch": 0,
+                "direct_touch_channel4": 0,
                 "punch_response": 0,
                 "relay_info": 0,
                 "relay_touch_channel4": 0,
@@ -417,6 +427,7 @@ class XHomeP2PRendezvousProbe:
             )
             next_kcp_start = 0.0
             next_discovery = 0.0
+            next_direct_touch = 0.0
             next_relay_touch = 0.0
             next_heartbeat = 0.0
             next_stats = 0.0
@@ -448,6 +459,25 @@ class XHomeP2PRendezvousProbe:
                     relay_candidates = [
                         candidate for candidate in candidates.values() if candidate.kind == P2PAddressKind.RELAY
                     ]
+                    relay_addresses = {candidate.address for candidate in relay_candidates}
+                    direct_touch_targets = {
+                        candidate.address for candidate in candidates.values() if candidate.kind != P2PAddressKind.RELAY
+                    }
+                    if selected_peer is not None and selected_peer not in relay_addresses:
+                        direct_touch_targets.add(selected_peer)
+                    if direct_touch_targets and now >= next_direct_touch:
+                        for target in direct_touch_targets:
+                            sock.sendto(
+                                encode_udp_packet(
+                                    P2PPacketType.KCP_DATA,
+                                    build_direct_touch_payload(now=time.time() + relay_touch_time_offset),
+                                    channel=RAW_CHANNEL,
+                                ),
+                                target,
+                            )
+                            sent_counts["direct_touch_channel4"] += 1
+                        next_direct_touch = now + relay_touch_interval
+
                     if relay_candidates and now >= next_relay_touch:
                         for candidate in relay_candidates:
                             sock.sendto(
