@@ -19,6 +19,7 @@ UDP_HEADER = struct.Struct("<HHH")
 CLIENT_CONTROL_CHANNEL = 1
 MEDIA_CHANNEL = 2
 RAW_CHANNEL = 4
+SPLIT_MEDIA_KCP_PREFIX = b"\x45\x33\x22\x11\x51\x00\x20\x00"
 
 
 class P2PPacketType(IntEnum):
@@ -723,6 +724,12 @@ class KcpMediaProbe:
         self.last_payload_at: int | None = None
         self.last_frame_at: int | None = None
         self.first_payloads: list[dict[str, Any]] = []
+        self.raw_kcp_prefixes = 0
+        self.raw_channel_kcp_segments = 0
+        self.raw_channel_kcp_default_prefixes = 0
+        self.raw_channel_kcp_missing_prefixes = 0
+        self.raw_channel_kcp_invalid_segments = 0
+        self._raw_kcp_prefix_by_path: dict[tuple[str, int, int], bytes] = {}
         self._last_stats_frame_count = -1
         self._last_stats_payload_bucket = -1
 
@@ -748,6 +755,10 @@ class KcpMediaProbe:
             return
         self.last_kcp_packet_at = now
         try:
+            packet = self._normalize_raw_channel_kcp_packet(packet, addr)
+            if packet is None:
+                self._emit_stats(force=True)
+                return
             channels = self._channels_for_addr(addr, int(packet.packet_type))
             for channel in channels:
                 for kcp_channel, payload in channel.receive_packet(packet):
@@ -759,6 +770,32 @@ class KcpMediaProbe:
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
             self._emit_stats()
+
+    def _normalize_raw_channel_kcp_packet(
+        self,
+        packet: UdpPacket,
+        addr: tuple[str, int],
+    ) -> UdpPacket | None:
+        """Rebuild native direct-LAN KCP split across channel 2 and channel 4."""
+
+        key = (addr[0], addr[1], int(packet.packet_type))
+        if packet.channel == MEDIA_CHANNEL and len(packet.payload) == 8:
+            self._raw_kcp_prefix_by_path[key] = packet.payload
+            self.raw_kcp_prefixes += 1
+            return None
+        if packet.channel != RAW_CHANNEL or len(packet.payload) <= 8:
+            return packet
+        prefix = self._raw_kcp_prefix_by_path.get(key)
+        if prefix is None:
+            self.raw_channel_kcp_missing_prefixes += 1
+            prefix = SPLIT_MEDIA_KCP_PREFIX
+            self.raw_channel_kcp_default_prefixes += 1
+        rebuilt = prefix + packet.payload[8:]
+        if not is_complete_kcp_segment(rebuilt):
+            self.raw_channel_kcp_invalid_segments += 1
+            return None
+        self.raw_channel_kcp_segments += 1
+        return UdpPacket(packet_type=packet.packet_type, channel=MEDIA_CHANNEL, payload=rebuilt)
 
     def update(self) -> None:
         """Flush pending KCP ACKs on active media paths."""
@@ -775,6 +812,11 @@ class KcpMediaProbe:
             ],
             "kcp_ack_datagrams": sum(channel.ack_stats()["datagrams"] for channel in self.paths.values()),
             "kcp_ack_segments": sum(channel.ack_stats()["segments"] for channel in self.paths.values()),
+            "raw_kcp_prefixes": self.raw_kcp_prefixes,
+            "raw_channel_kcp_segments": self.raw_channel_kcp_segments,
+            "raw_channel_kcp_default_prefixes": self.raw_channel_kcp_default_prefixes,
+            "raw_channel_kcp_missing_prefixes": self.raw_channel_kcp_missing_prefixes,
+            "raw_channel_kcp_invalid_segments": self.raw_channel_kcp_invalid_segments,
             "udp_packets": self.udp_packets,
             "kcp_payloads": self.kcp_payloads,
             "app_packets": self.app_packets,
@@ -845,13 +887,15 @@ class KcpMediaProbe:
                 (self.jpeg_dir / f"frame-{self.jpeg_frames:06d}.jpg").write_bytes(frame.payload)
         self._emit_stats()
 
-    def _emit_stats(self) -> None:
+    def _emit_stats(self, *, force: bool = False) -> None:
         """Publish a compact snapshot of current media counters."""
 
         if self.on_stats is None:
             return
         payload_bucket = self.kcp_payloads // 50
         if (
+            force
+            or
             self.error is not None
             or self.frames != self._last_stats_frame_count
             or self.kcp_payloads <= 5
@@ -876,6 +920,15 @@ def native_payload_summary(payload: bytes) -> dict[str, Any]:
     else:
         summary["payload_text"] = payload.decode("utf-8", errors="replace")
     return summary
+
+
+def is_complete_kcp_segment(payload: bytes) -> bool:
+    """Return whether the bytes contain at least one complete KCP segment."""
+
+    if len(payload) < 24:
+        return False
+    payload_len = int.from_bytes(payload[20:24], "little", signed=False)
+    return 24 + payload_len <= len(payload)
 
 
 def open_output(path: Path | None) -> BinaryIO | None:

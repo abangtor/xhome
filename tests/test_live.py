@@ -21,8 +21,10 @@ from xhome.live import (
 )
 from xhome.live_kcp import CONTROL_CONV_ID, MEDIA_CONV_ID, MinimalKCP, XHomeKcpChannels, strip_uid_suffix
 from xhome.live_p2p import (
+    KcpMediaProbe,
     P2PAddressKind,
     P2PPacketType,
+    RAW_CHANNEL,
     build_client_connect_payload,
     build_direct_touch_payload,
     build_peer_punch_payload,
@@ -599,6 +601,54 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual([packet.payload for packet, _addr in packets], [b"one", b"two"])
         self.assertEqual(len(sock.datagrams), 1)
 
+    def test_kcp_media_probe_reassembles_raw_channel_kcp_continuation(self):
+        def app_payload(flag: int, index: int, payload: bytes) -> bytes:
+            header = bytearray(20)
+            header[:4] = (8).to_bytes(4, "little")
+            header[4:8] = (len(payload) + 12).to_bytes(4, "little")
+            header[11] = MediaType.JPEG_FRAME
+            header[14] = index
+            header[15] = flag
+            header[16:20] = len(payload).to_bytes(4, "little")
+            return bytes(header) + payload
+
+        frames = []
+        probe = KcpMediaProbe(uid="LSV212PFJU5TQT42R3UX", sock=FakeSendUdpSocket(), on_frame=frames.append)
+        addr = ("192.168.7.178", 16904)
+        start = minimal_kcp_push(sequence=1, payload=app_payload(1, 1, b"\xff\xd8"))
+        end = minimal_kcp_push(sequence=2, payload=app_payload(2, 2, b"\xff\xd9"))
+
+        probe.receive_packet(decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, start, channel=2)), addr)
+        probe.receive_packet(decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, end[:8], channel=2)), addr)
+        probe.receive_packet(
+            decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, b"nonce123" + end[8:], channel=RAW_CHANNEL)),
+            addr,
+        )
+
+        self.assertEqual([frame.payload for frame in frames], [b"\xff\xd8\xff\xd9"])
+        self.assertEqual(probe.raw_kcp_prefixes, 1)
+        self.assertEqual(probe.raw_channel_kcp_segments, 1)
+        self.assertEqual(probe.raw_channel_kcp_missing_prefixes, 0)
+
+        default_frames = []
+        default_probe = KcpMediaProbe(
+            uid="LSV212PFJU5TQT42R3UX",
+            sock=FakeSendUdpSocket(),
+            on_frame=default_frames.append,
+        )
+        default_probe.receive_packet(
+            decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, start, channel=2)),
+            addr,
+        )
+        default_probe.receive_packet(
+            decode_udp_packet(encode_udp_packet(P2PPacketType.KCP_DATA, b"nonce123" + end[8:], channel=RAW_CHANNEL)),
+            addr,
+        )
+
+        self.assertEqual([frame.payload for frame in default_frames], [b"\xff\xd8\xff\xd9"])
+        self.assertEqual(default_probe.raw_channel_kcp_default_prefixes, 1)
+        self.assertEqual(default_probe.raw_channel_kcp_missing_prefixes, 1)
+
 
 class FakeKCP:
     def __init__(self, conv_id, identity_token):
@@ -663,6 +713,14 @@ class FakeUdpSocket:
 
     def settimeout(self, timeout):
         self.timeout = timeout
+
+
+class FakeSendUdpSocket:
+    def __init__(self) -> None:
+        self.sent = []
+
+    def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
+        self.sent.append((data, addr))
 
 
 def minimal_kcp_push(*, sequence: int, payload: bytes, timestamp: int = 0) -> bytes:

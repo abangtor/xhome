@@ -50,6 +50,7 @@ class LiveStreamSourceTests(unittest.TestCase):
             camera_source,
         )
         self.assertIn('"live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments")', camera_source)
+        self.assertIn('"live_p2p_raw_channel_kcp_segments"', camera_source)
         self.assertIn("_attr_frame_interval = 0.2", camera_source)
         self.assertNotIn("CameraEntityFeature.STREAM", camera_source)
         self.assertIn("async def stream_source", camera_source)
@@ -72,6 +73,8 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("interval: float = 0.01", live_p2p_source)
         self.assertIn("direct_touch_burst_size: int = 4", live_p2p_source)
         self.assertIn("heartbeat_interval: float = 2.0", live_p2p_source)
+        self.assertIn("_normalize_raw_channel_kcp_packet", live_p2p_source)
+        self.assertIn("prefix + packet.payload[8:]", live_p2p_source)
         self.assertIn("self.ack_batch_size = 3", live_kcp_source)
         self.assertNotIn("render_live_stream_url", camera_source)
         self.assertNotIn("live_stream_url_template", camera_source)
