@@ -40,7 +40,9 @@ MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
 MJPEG_NEXT_FRAME_TIMEOUT = 15.0
 LIVE_STATE_WRITE_INTERVAL = 2.0
-NATIVE_CONTROL_KEEPALIVE_INTERVAL = 45.0
+NATIVE_CONTROL_KEEPALIVE_INTERVAL = 12.0
+NATIVE_CONTROL_READ_INTERVAL = 2.0
+NATIVE_CONTROL_READ_DURATION = 0.005
 NATIVE_CONTROL_POST_START_STATUS_COMMANDS = (
     ControlCommand.GET_BATTERY_LEVEL_REQ,
     ControlCommand.GET_DEVICE_RSSI_REQ,
@@ -176,6 +178,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     "native_control_start_refreshes"
                 ),
                 "live_native_control_keepalives": self._live_transport_stats.get("native_control_keepalives"),
+                "live_native_control_read_polls": self._live_transport_stats.get("native_control_read_polls"),
                 "live_native_control_status_probes": self._live_transport_stats.get(
                     "native_control_status_probes"
                 ),
@@ -516,8 +519,10 @@ class _NativeLiveControlKeeper:
         self._metadata = metadata
         self._first_frame_refresh_sent = False
         self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
+        self._next_read = time.monotonic() + NATIVE_CONTROL_READ_INTERVAL
         self._start_refreshes = 0
         self._keepalives = 0
+        self._read_polls = 0
         self._status_probes = 0
         self._device_setting_probes = 0
         self._frames = 0
@@ -536,17 +541,21 @@ class _NativeLiveControlKeeper:
         self._send_start_refresh()
         self._send_post_start_status_probes()
         self._send_post_start_device_setting_probes()
-        self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
+        now = time.monotonic()
+        self._next_keepalive = now + NATIVE_CONTROL_KEEPALIVE_INTERVAL
+        self._next_read = now + NATIVE_CONTROL_READ_INTERVAL
 
     def tick(self) -> None:
         """Read pending control responses and periodically refresh AV start."""
 
-        self._read_pending()
         now = time.monotonic()
-        if now < self._next_keepalive:
-            return
-        self._send_keepalive()
-        self._next_keepalive = now + NATIVE_CONTROL_KEEPALIVE_INTERVAL
+        if now >= self._next_read:
+            self._read_pending(duration=NATIVE_CONTROL_READ_DURATION)
+            self._next_read = now + NATIVE_CONTROL_READ_INTERVAL
+        if now >= self._next_keepalive:
+            self._send_keepalive()
+            self._next_keepalive = now + NATIVE_CONTROL_KEEPALIVE_INTERVAL
+            self._next_read = now + NATIVE_CONTROL_READ_INTERVAL
 
     def as_dict(self) -> dict[str, Any]:
         """Return compact diagnostics for camera attributes."""
@@ -554,6 +563,7 @@ class _NativeLiveControlKeeper:
         return {
             "native_control_start_refreshes": self._start_refreshes,
             "native_control_keepalives": self._keepalives,
+            "native_control_read_polls": self._read_polls,
             "native_control_status_probes": self._status_probes,
             "native_control_device_setting_probes": self._device_setting_probes,
             "native_control_frames": self._frames,
@@ -598,9 +608,10 @@ class _NativeLiveControlKeeper:
         self._last_sent_at = int(time.time())
         return True
 
-    def _read_pending(self) -> None:
+    def _read_pending(self, *, duration: float = 0.05) -> None:
+        self._read_polls += 1
         try:
-            frames = self._transport.read_available(duration=0.05)
+            frames = self._transport.read_available(duration=duration)
         except Exception as err:  # noqa: BLE001
             self._last_error = str(err)
             return
