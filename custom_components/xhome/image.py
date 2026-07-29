@@ -17,6 +17,9 @@ from .coordinator import XHomeDataUpdateCoordinator, XHomeLatestEventMedia
 from .entity import XHomeEntity
 
 LOGGER = logging.getLogger(__name__)
+JPEG_EXIF_PREFIX = b"Exif\x00\x00"
+JPEG_ORIENTATION_BY_ROTATION = {0: 1, 90: 6, 180: 3, 270: 8}
+JPEG_SOI = b"\xff\xd8"
 
 
 async def async_setup_entry(
@@ -172,3 +175,93 @@ def _image_format(image: Any, content_type: str) -> str:
     if content_type == "image/webp":
         return "WEBP"
     return "JPEG"
+
+
+def set_jpeg_exif_orientation(image_bytes: bytes, rotation: int) -> bytes:
+    """Set a JPEG EXIF orientation tag without re-encoding image pixels."""
+
+    orientation = JPEG_ORIENTATION_BY_ROTATION.get(rotation)
+    if orientation is None or not image_bytes.startswith(JPEG_SOI):
+        return image_bytes
+    updated = _replace_jpeg_exif_orientation(image_bytes, orientation)
+    if updated is not None:
+        return updated
+    return _insert_jpeg_exif_orientation(image_bytes, orientation)
+
+
+def _replace_jpeg_exif_orientation(image_bytes: bytes, orientation: int) -> bytes | None:
+    """Return JPEG bytes with an updated EXIF orientation tag, if present."""
+
+    offset = 2
+    while offset + 4 <= len(image_bytes):
+        if image_bytes[offset] != 0xFF:
+            return None
+        marker = image_bytes[offset + 1]
+        if marker == 0xDA:
+            return None
+        length = int.from_bytes(image_bytes[offset + 2 : offset + 4], "big", signed=False)
+        segment_start = offset + 4
+        segment_end = offset + 2 + length
+        if segment_end > len(image_bytes):
+            return None
+        if marker == 0xE1 and image_bytes[segment_start : segment_start + len(JPEG_EXIF_PREFIX)] == JPEG_EXIF_PREFIX:
+            return _replace_tiff_orientation(image_bytes, segment_start + len(JPEG_EXIF_PREFIX), segment_end, orientation)
+        offset = segment_end
+    return None
+
+
+def _replace_tiff_orientation(
+    image_bytes: bytes,
+    tiff_start: int,
+    segment_end: int,
+    orientation: int,
+) -> bytes | None:
+    """Return JPEG bytes with the TIFF IFD0 orientation value replaced."""
+
+    if tiff_start + 8 > segment_end:
+        return None
+    endian_tag = image_bytes[tiff_start : tiff_start + 2]
+    if endian_tag == b"II":
+        byteorder = "little"
+    elif endian_tag == b"MM":
+        byteorder = "big"
+    else:
+        return None
+    ifd_offset = int.from_bytes(image_bytes[tiff_start + 4 : tiff_start + 8], byteorder, signed=False)
+    ifd_start = tiff_start + ifd_offset
+    if ifd_start + 2 > segment_end:
+        return None
+    entry_count = int.from_bytes(image_bytes[ifd_start : ifd_start + 2], byteorder, signed=False)
+    entries_start = ifd_start + 2
+    for index in range(entry_count):
+        entry_start = entries_start + (index * 12)
+        entry_end = entry_start + 12
+        if entry_end > segment_end:
+            return None
+        tag = int.from_bytes(image_bytes[entry_start : entry_start + 2], byteorder, signed=False)
+        field_type = int.from_bytes(image_bytes[entry_start + 2 : entry_start + 4], byteorder, signed=False)
+        count = int.from_bytes(image_bytes[entry_start + 4 : entry_start + 8], byteorder, signed=False)
+        if tag == 0x0112 and field_type == 3 and count == 1:
+            updated = bytearray(image_bytes)
+            updated[entry_start + 8 : entry_start + 10] = orientation.to_bytes(2, byteorder, signed=False)
+            return bytes(updated)
+    return None
+
+
+def _insert_jpeg_exif_orientation(image_bytes: bytes, orientation: int) -> bytes:
+    """Insert a minimal EXIF orientation segment after the JPEG SOI marker."""
+
+    tiff = (
+        b"MM\x00\x2a"
+        + (8).to_bytes(4, "big")
+        + (1).to_bytes(2, "big")
+        + (0x0112).to_bytes(2, "big")
+        + (3).to_bytes(2, "big")
+        + (1).to_bytes(4, "big")
+        + orientation.to_bytes(2, "big")
+        + b"\x00\x00"
+        + (0).to_bytes(4, "big")
+    )
+    payload = JPEG_EXIF_PREFIX + tiff
+    segment = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
+    return image_bytes[:2] + segment + image_bytes[2:]

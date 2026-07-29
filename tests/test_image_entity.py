@@ -104,6 +104,28 @@ class ImageEntityTests(unittest.TestCase):
     def test_rotate_image_bytes_noops_without_rotation(self):
         self.assertEqual(image.rotate_image_bytes(b"not really an image", 0, "image/jpeg"), b"not really an image")
 
+    def test_set_jpeg_exif_orientation_updates_existing_tag(self):
+        jpeg = (
+            b"\xff\xd8"
+            + b"\xff\xe1\x00\x22Exif\x00\x00"
+            + b"MM\x00\x2a\x00\x00\x00\x08"
+            + b"\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00\x01\x00\x00"
+            + b"\x00\x00\x00\x00"
+            + b"\xff\xda"
+        )
+
+        updated = image.set_jpeg_exif_orientation(jpeg, 90)
+
+        self.assertIn(b"\x01\x12\x00\x03\x00\x00\x00\x01\x00\x06\x00\x00", updated)
+
+    def test_set_jpeg_exif_orientation_inserts_missing_tag(self):
+        jpeg = b"\xff\xd8\xff\xe0\x00\x04\xff\xda"
+
+        updated = image.set_jpeg_exif_orientation(jpeg, 270)
+
+        self.assertIn(b"Exif\x00\x00", updated)
+        self.assertIn(b"\x01\x12\x00\x03\x00\x00\x00\x01\x00\x08\x00\x00", updated)
+
 
 if __name__ == "__main__":
     unittest.main()
