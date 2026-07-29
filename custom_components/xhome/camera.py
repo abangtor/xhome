@@ -18,7 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
 
-from .api.live import LiveAppMediaFrame, LiveSessionMetadata, MediaType
+from .api.live import ControlCommand, LiveAppMediaFrame, LiveSessionMetadata, MediaType
 from .api.live_p2p import XHomeP2PRendezvousProbe
 from .api.live_transport import XHomeLiveCloudTransport, extract_p2p_servers
 from .const import DOMAIN
@@ -40,6 +40,12 @@ MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
 MJPEG_NEXT_FRAME_TIMEOUT = 15.0
 LIVE_STATE_WRITE_INTERVAL = 2.0
+NATIVE_CONTROL_KEEPALIVE_INTERVAL = 60.0
+NATIVE_CONTROL_POST_START_STATUS_COMMANDS = (
+    ControlCommand.GET_BATTERY_LEVEL_REQ,
+    ControlCommand.GET_DEVICE_RSSI_REQ,
+    ControlCommand.GET_RESOLUTION_REQ,
+)
 
 
 async def async_setup_entry(
@@ -165,7 +171,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     "native_control_start_refreshes"
                 ),
                 "live_native_control_keepalives": self._live_transport_stats.get("native_control_keepalives"),
+                "live_native_control_status_probes": self._live_transport_stats.get(
+                    "native_control_status_probes"
+                ),
                 "live_native_control_frames": self._live_transport_stats.get("native_control_frames"),
+                "live_native_control_last_command": self._live_transport_stats.get(
+                    "native_control_last_command"
+                ),
                 "live_native_control_last_sent_at": self._live_transport_stats.get("native_control_last_sent_at"),
                 "live_native_control_last_read_at": self._live_transport_stats.get("native_control_last_read_at"),
                 "live_native_control_last_error": self._live_transport_stats.get("native_control_last_error"),
@@ -492,10 +504,12 @@ class _NativeLiveControlKeeper:
         self._transport = transport
         self._metadata = metadata
         self._first_frame_refresh_sent = False
-        self._next_keepalive = time.monotonic() + 60.0
+        self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
         self._start_refreshes = 0
         self._keepalives = 0
+        self._status_probes = 0
         self._frames = 0
+        self._last_command: int | None = None
         self._last_sent_at: int | None = None
         self._last_read_at: int | None = None
         self._last_error: str | None = None
@@ -507,6 +521,8 @@ class _NativeLiveControlKeeper:
             return
         self._first_frame_refresh_sent = True
         self._send_start_refresh()
+        self._send_post_start_status_probes()
+        self._next_keepalive = time.monotonic() + NATIVE_CONTROL_KEEPALIVE_INTERVAL
 
     def tick(self) -> None:
         """Read pending control responses and periodically refresh AV start."""
@@ -515,8 +531,8 @@ class _NativeLiveControlKeeper:
         now = time.monotonic()
         if now < self._next_keepalive:
             return
-        self._send_start_refresh(keepalive=True)
-        self._next_keepalive = now + 60.0
+        self._send_keepalive()
+        self._next_keepalive = now + NATIVE_CONTROL_KEEPALIVE_INTERVAL
 
     def as_dict(self) -> dict[str, Any]:
         """Return compact diagnostics for camera attributes."""
@@ -524,23 +540,39 @@ class _NativeLiveControlKeeper:
         return {
             "native_control_start_refreshes": self._start_refreshes,
             "native_control_keepalives": self._keepalives,
+            "native_control_status_probes": self._status_probes,
             "native_control_frames": self._frames,
+            "native_control_last_command": self._last_command,
             "native_control_last_sent_at": self._last_sent_at,
             "native_control_last_read_at": self._last_read_at,
             "native_control_last_error": self._last_error,
         }
 
-    def _send_start_refresh(self, *, keepalive: bool = False) -> None:
+    def _send_start_refresh(self) -> None:
+        if self._send_control_frame(self._metadata.start_command):
+            self._start_refreshes += 1
+        self._read_pending()
+
+    def _send_post_start_status_probes(self) -> None:
+        for command in NATIVE_CONTROL_POST_START_STATUS_COMMANDS:
+            if self._send_control_frame(command):
+                self._status_probes += 1
+        self._read_pending()
+
+    def _send_keepalive(self) -> None:
+        if self._send_control_frame(ControlCommand.GET_BATTERY_LEVEL_REQ):
+            self._keepalives += 1
+        self._read_pending()
+
+    def _send_control_frame(self, command: int) -> bool:
         try:
-            self._transport.send_frame(self._metadata.start_command)
+            self._transport.send_frame(command)
         except Exception as err:  # noqa: BLE001
             self._last_error = str(err)
-            return
-        self._start_refreshes += 1
-        if keepalive:
-            self._keepalives += 1
+            return False
+        self._last_command = int(command)
         self._last_sent_at = int(time.time())
-        self._read_pending()
+        return True
 
     def _read_pending(self) -> None:
         try:

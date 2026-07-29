@@ -111,6 +111,12 @@ class LiveFrameTests(unittest.TestCase):
         self.assertEqual(metadata.start_command, 20)
         self.assertEqual(metadata.as_bridge_payload()["media_header_bytes"], 40)
 
+    def test_control_commands_include_native_status_probes(self):
+        self.assertEqual(ControlCommand.GET_BATTERY_LEVEL_REQ, 114)
+        self.assertEqual(ControlCommand.GET_RESOLUTION_REQ, 138)
+        self.assertEqual(ControlCommand.GET_DEVICE_STATUS_REQ, 152)
+        self.assertEqual(ControlCommand.GET_DEVICE_RSSI_REQ, 154)
+
     def test_parse_live_app_media_packet(self):
         header = bytearray(20)
         header[:4] = (8).to_bytes(4, "little")
