@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import time
 from threading import Event, Thread
 from typing import Any
 
 from aiohttp import web
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -64,6 +65,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
     _attr_translation_key = "live_camera"
     _attr_should_poll = False
     _attr_content_type = "image/jpeg"
+    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
         """Initialize the live camera entity."""
@@ -72,6 +74,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         XHomeEntity.__init__(self, coordinator, uid, "live_camera")
         self._last_live_jpeg: bytes | None = None
         self._stream_token = secrets.token_urlsafe(24)
+        self._live_streams_started = 0
+        self._live_frames = 0
+        self._live_last_started_at: int | None = None
+        self._live_last_frame_at: int | None = None
+        self._live_last_error: str | None = None
 
     @property
     def stream_token(self) -> str:
@@ -100,6 +107,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "native_media_header_bytes": 40,
                 "video_codec": "mjpeg",
                 "audio_codec": "g711",
+                "live_streams_started": self._live_streams_started,
+                "live_frames": self._live_frames,
+                "live_last_started_at": self._live_last_started_at,
+                "live_last_frame_at": self._live_last_frame_at,
+                "live_last_error": self._live_last_error,
             }
         )
         if data is not None and data.device_id is not None:
@@ -138,9 +150,17 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 return
             loop.call_soon_threadsafe(self._handle_live_jpeg, frame_queue, frame.payload)
 
+        def on_error(message: str) -> None:
+            loop.call_soon_threadsafe(self._handle_live_error, message)
+
+        self._live_streams_started += 1
+        self._live_last_started_at = int(time.time())
+        self._live_last_error = None
+        self.async_write_ha_state()
+
         thread = Thread(
             target=_run_native_mjpeg_worker,
-            args=(session, on_frame, stop_event),
+            args=(session, on_frame, on_error, stop_event),
             name=f"xhome-live-{redact_uid(self.uid)}",
             daemon=True,
         )
@@ -192,7 +212,17 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         """Cache one live JPEG and queue it for the MJPEG response."""
 
         self._last_live_jpeg = frame
+        self._live_frames += 1
+        self._live_last_frame_at = int(time.time())
+        self._live_last_error = None
         _replace_latest_frame(frame_queue, frame)
+        self.async_write_ha_state()
+
+    def _handle_live_error(self, message: str) -> None:
+        """Store one native live stream error for diagnostics."""
+
+        self._live_last_error = message
+        self.async_write_ha_state()
 
 
 def live_stream_url_template(options: dict[str, Any]) -> str:
@@ -271,6 +301,7 @@ def _native_mjpeg_url(hass: HomeAssistant, entry_id: str, uid: str, token: str) 
 def _run_native_mjpeg_worker(
     session: XHomeLiveStreamSession,
     on_frame: Any,
+    on_error: Any,
     stop_event: Event,
 ) -> None:
     """Run one blocking native live session for the MJPEG response."""
@@ -296,6 +327,7 @@ def _run_native_mjpeg_worker(
                 relays = _unique_p2p_relays(extract_p2p_servers(native_frames))
                 if not relays:
                     raise RuntimeError("Native IoT session did not return any P2P relays")
+                LOGGER.info("XHome native live stream using relays: %s", relays)
 
                 XHomeP2PRendezvousProbe(
                     uid=metadata.uid,
@@ -309,7 +341,9 @@ def _run_native_mjpeg_worker(
             finally:
                 transport.send_frame(metadata.stop_command)
     except Exception as err:  # noqa: BLE001
-        LOGGER.debug("XHome native live stream stopped: %s", err)
+        message = str(err)
+        on_error(message)
+        LOGGER.warning("XHome native live stream stopped: %s", message)
     finally:
         stop_event.set()
 
