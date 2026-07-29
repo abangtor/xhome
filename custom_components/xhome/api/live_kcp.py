@@ -40,7 +40,6 @@ class KcpAck:
 
     timestamp: int
     sequence: int
-    una: int
 
 
 CONTROL_CHANNEL_CONFIG = KcpChannelConfig(channel=CLIENT_CONTROL_CHANNEL, conv_id=CONTROL_CONV_ID)
@@ -284,8 +283,7 @@ class MinimalKCP:
                 return
             if command == self.PUSH:
                 self._queue_received(sequence, data[body_start:body_end])
-                una = self._expected_receive_sequence if self._expected_receive_sequence is not None else sequence + 1
-                self._queue_ack(KcpAck(timestamp=timestamp, sequence=sequence, una=una))
+                self._queue_ack(KcpAck(timestamp=timestamp, sequence=sequence))
             offset = body_end
 
     def get_all_received(self) -> list[bytes]:
@@ -355,6 +353,7 @@ class MinimalKCP:
         if not self._pending_acks:
             return
         window = self._receive_window()
+        una = self._expected_receive_sequence or 0
         pending = self._pending_acks
         self._pending_acks = []
         batch: list[bytes] = []
@@ -364,7 +363,7 @@ class MinimalKCP:
                 self.ACK,
                 timestamp=ack.timestamp,
                 sequence=ack.sequence,
-                una=ack.una,
+                una=una,
                 window=window,
             )
             if batch and batch_bytes + len(segment) > self.ack_max_datagram_bytes:

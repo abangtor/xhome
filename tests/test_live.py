@@ -608,6 +608,7 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(len(sent[0]), 48)
         self.assertEqual([sent[0][4], sent[0][28]], [MinimalKCP.ACK, MinimalKCP.ACK])
         self.assertEqual([int.from_bytes(sent[0][12:16], "little"), int.from_bytes(sent[0][36:40], "little")], [1, 2])
+        self.assertEqual([int.from_bytes(sent[0][16:20], "little"), int.from_bytes(sent[0][40:44], "little")], [3, 3])
 
     def test_minimal_kcp_packs_ack_batches_to_native_mtu(self):
         sent = []
@@ -633,6 +634,13 @@ class LiveTransportTests(unittest.TestCase):
             kcp.receive(minimal_kcp_push(sequence=sequence, payload=b"x"))
 
         self.assertEqual([len(payload) for payload in sent], [72, 72])
+        self.assertEqual(
+            [
+                [int.from_bytes(payload[offset + 16 : offset + 20], "little") for offset in range(0, len(payload), 24)]
+                for payload in sent
+            ],
+            [[3, 3, 3], [6, 6, 6]],
+        )
 
     def test_minimal_kcp_ack_window_reflects_queued_receive_payloads(self):
         sent = []
