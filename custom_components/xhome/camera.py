@@ -25,7 +25,13 @@ from .const import CONF_LIVE_STREAM_URL_TEMPLATE, DOMAIN
 from .coordinator import XHomeDataUpdateCoordinator, XHomeLiveStreamSession
 from .entity import XHomeEntity
 from .helpers import redact_uid
-from .image import image_rotation_degrees, is_decodable_jpeg, rotate_image_bytes
+from .image import (
+    LIVE_ROTATION_EDGE_CROP_PIXELS,
+    image_rotation_degrees,
+    is_decodable_jpeg,
+    rotate_image_bytes,
+    rotate_live_image_bytes,
+)
 
 LOGGER = logging.getLogger(__name__)
 DATA_LIVE_CAMERAS = f"{DOMAIN}_live_cameras"
@@ -33,6 +39,7 @@ DATA_LIVE_VIEW_REGISTERED = f"{DOMAIN}_live_view_registered"
 MJPEG_BOUNDARY = b"xhome"
 MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
+LIVE_STATE_WRITE_INTERVAL = 2.0
 
 
 async def async_setup_entry(
@@ -84,6 +91,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
         self._live_transport_stats: dict[str, Any] = {}
+        self._live_last_state_write_at = 0.0
 
     @property
     def stream_token(self) -> str:
@@ -113,6 +121,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "video_codec": "mjpeg",
                 "audio_codec": "g711",
                 "image_rotation": self._image_rotation(),
+                "live_rotation_edge_crop_pixels": LIVE_ROTATION_EDGE_CROP_PIXELS,
                 "live_streams_started": self._live_streams_started,
                 "live_frames": self._live_frames,
                 "live_rotated_frames": self._live_rotated_frames,
@@ -170,7 +179,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_frame_at = None
         self._live_last_error = None
         self._live_transport_stats = {}
-        self.async_write_ha_state()
+        self._write_live_state(force=True)
 
         thread = Thread(
             target=_run_native_mjpeg_worker,
@@ -200,7 +209,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     if not thread.is_alive():
                         break
                     continue
-                frame = self._rotate_stream_jpeg(frame)
+                frame, frame_status = await self.hass.async_add_executor_job(self._prepare_stream_jpeg, frame)
+                if frame_status == "invalid":
+                    self._live_invalid_jpeg_frames += 1
+                elif frame_status == "rotation_failed":
+                    self._live_rotation_failures += 1
+                elif frame_status == "rotated":
+                    self._live_rotated_frames += 1
                 if frame is None:
                     continue
                 await response.write(
@@ -238,7 +253,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_frame_at = int(time.time())
         self._live_last_error = None
         _replace_latest_frame(frame_queue, frame)
-        self.async_write_ha_state()
+        self._write_live_state()
 
     def _rotate_jpeg(self, image: bytes) -> bytes:
         """Apply the configured camera image rotation to JPEG bytes."""
@@ -257,28 +272,24 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             self._live_rotated_frames += 1
         return rotated
 
-    def _rotate_stream_jpeg(self, image: bytes) -> bytes | None:
-        """Apply rotation for the MJPEG stream, skipping failed rotated frames."""
+    def _prepare_stream_jpeg(self, image: bytes) -> tuple[bytes | None, str]:
+        """Prepare one MJPEG frame for streaming."""
 
         rotation = self._image_rotation()
         if rotation == 0:
             if not is_decodable_jpeg(image):
-                self._live_invalid_jpeg_frames += 1
-                return None
-            return image
-        if not is_decodable_jpeg(image):
-            self._live_invalid_jpeg_frames += 1
-            return None
-        rotated = rotate_image_bytes(
+                return None, "invalid"
+            return image, "original"
+        rotated = rotate_live_image_bytes(
             image,
             rotation,
             self._attr_content_type,
         )
+        if rotated is None:
+            return None, "invalid"
         if rotated == image:
-            self._live_rotation_failures += 1
-            return None
-        self._live_rotated_frames += 1
-        return rotated
+            return None, "rotation_failed"
+        return rotated, "rotated"
 
     def _image_rotation(self) -> int:
         """Return the configured camera image rotation."""
@@ -289,12 +300,21 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         """Store one native live stream error for diagnostics."""
 
         self._live_last_error = message
-        self.async_write_ha_state()
+        self._write_live_state(force=True)
 
     def _handle_live_transport_stats(self, stats: dict[str, Any]) -> None:
         """Store compact native media pipeline counters for diagnostics."""
 
         self._live_transport_stats = stats
+        self._write_live_state()
+
+    def _write_live_state(self, *, force: bool = False) -> None:
+        """Write live diagnostics to HA state at a throttled cadence."""
+
+        now = time.monotonic()
+        if not force and now - self._live_last_state_write_at < LIVE_STATE_WRITE_INTERVAL:
+            return
+        self._live_last_state_write_at = now
         self.async_write_ha_state()
 
 

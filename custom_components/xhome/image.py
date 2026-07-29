@@ -20,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 JPEG_EXIF_PREFIX = b"Exif\x00\x00"
 JPEG_ORIENTATION_BY_ROTATION = {0: 1, 90: 6, 180: 3, 270: 8}
 JPEG_SOI = b"\xff\xd8"
+LIVE_ROTATION_EDGE_CROP_PIXELS = 32
 
 
 async def async_setup_entry(
@@ -163,6 +164,55 @@ def rotate_image_bytes(image_bytes: bytes, rotation: int, content_type: str) -> 
     except Exception as err:  # noqa: BLE001
         LOGGER.debug("XHome latest event image rotation failed: %s", err)
         return image_bytes
+
+
+def rotate_live_image_bytes(
+    image_bytes: bytes,
+    rotation: int,
+    content_type: str,
+    *,
+    edge_crop_pixels: int = LIVE_ROTATION_EDGE_CROP_PIXELS,
+) -> bytes | None:
+    """Rotate one live JPEG frame after cropping the unstable source edge."""
+
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        LOGGER.warning("Pillow is not installed; dropping rotated XHome live image frame")
+        return None
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as source:
+            image = ImageOps.exif_transpose(source)
+            image = _crop_live_rotation_edge(image, rotation, edge_crop_pixels)
+            if rotation == 90:
+                image = image.transpose(Image.Transpose.ROTATE_270)
+            elif rotation == 180:
+                image = image.transpose(Image.Transpose.ROTATE_180)
+            elif rotation == 270:
+                image = image.transpose(Image.Transpose.ROTATE_90)
+            elif rotation != 0:
+                return None
+
+            output = BytesIO()
+            image.save(output, format=_image_format(source, content_type))
+            return output.getvalue()
+    except Exception as err:  # noqa: BLE001
+        LOGGER.debug("XHome live image rotation failed: %s", err)
+        return None
+
+
+def _crop_live_rotation_edge(image: Any, rotation: int, edge_crop_pixels: int) -> Any:
+    """Crop raw live-frame padding that becomes a side stripe after rotation."""
+
+    if edge_crop_pixels <= 0:
+        return image
+    width, height = image.size
+    if rotation == 90 and height > edge_crop_pixels:
+        return image.crop((0, 0, width, height - edge_crop_pixels))
+    if rotation == 270 and height > edge_crop_pixels:
+        return image.crop((0, edge_crop_pixels, width, height))
+    return image
 
 
 def _image_format(image: Any, content_type: str) -> str:

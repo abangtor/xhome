@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import importlib.util
+from io import BytesIO
 from pathlib import Path
 import sys
 import types
@@ -128,6 +129,26 @@ class ImageEntityTests(unittest.TestCase):
 
     def test_is_decodable_jpeg_rejects_non_jpeg(self):
         self.assertFalse(image.is_decodable_jpeg(b"not a jpeg"))
+
+    def test_rotate_live_image_bytes_crops_source_edge_before_rotation(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+
+        source = BytesIO()
+        Image.new("RGB", (10, 6), "white").save(source, format="JPEG")
+
+        rotated = image.rotate_live_image_bytes(
+            source.getvalue(),
+            90,
+            "image/jpeg",
+            edge_crop_pixels=2,
+        )
+
+        self.assertIsNotNone(rotated)
+        with Image.open(BytesIO(rotated)) as rotated_image:
+            self.assertEqual(rotated_image.size, (4, 10))
 
 
 if __name__ == "__main__":
