@@ -68,7 +68,7 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("interval: float = 0.01", live_p2p_source)
         self.assertIn("direct_touch_burst_size: int = 4", live_p2p_source)
         self.assertIn("heartbeat_interval: float = 2.0", live_p2p_source)
-        self.assertIn("self.ack_batch_size = 6", live_kcp_source)
+        self.assertIn("self.ack_batch_size = 3", live_kcp_source)
         self.assertNotIn("render_live_stream_url", camera_source)
         self.assertNotIn("live_stream_url_template", camera_source)
         self.assertIn('"embedded_live_stream": True', camera_source)
