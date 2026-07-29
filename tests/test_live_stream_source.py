@@ -35,10 +35,10 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("XHomeP2PRendezvousProbe", camera_source)
         self.assertNotIn('"token"', camera_source)
 
-    def test_home_assistant_manifest_installs_kcp_for_embedded_live_stream(self):
+    def test_home_assistant_manifest_does_not_require_external_kcp_wheel(self):
         manifest = json.loads((ROOT / "custom_components" / "xhome" / "manifest.json").read_text())
 
-        self.assertIn("kcp>=0.1.6", manifest["requirements"])
+        self.assertNotIn("kcp>=0.1.6", manifest["requirements"])
 
     def test_prepare_live_stream_fetches_native_token_metadata(self):
         coordinator_source = COORDINATOR_PATH.read_text()

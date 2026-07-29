@@ -22,7 +22,7 @@ KcpFactory = Callable[[int, Any], Any]
 
 
 class MissingKcpDependency(RuntimeError):
-    """Raised when the optional KCP dependency is unavailable."""
+    """Deprecated compatibility exception for older callers."""
 
 
 @dataclass(frozen=True)
@@ -182,18 +182,93 @@ def packet_conv_id(payload: bytes) -> int | None:
 
 
 def default_kcp_factory(conv_id: int, _identity_token: Any) -> Any:
-    """Create a KCP object using the optional ``kcp`` package."""
+    """Create the built-in minimal KCP implementation used by XHome live media."""
 
-    try:
-        from kcp import KCP  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise MissingKcpDependency(
-            "Install the optional live sidecar KCP dependency, for example `pip install kcp>=0.1.6`."
-        ) from exc
-    return KCP(
-        conv_id,
-        no_delay=True,
-        update_interval=10,
-        resend_count=2,
-        no_congestion_control=True,
-    )
+    return MinimalKCP(conv_id)
+
+
+class MinimalKCP:
+    """Small KCP subset sufficient for XHome live JPEG media.
+
+    XHome media arrives as ordinary KCP PUSH segments where each KCP payload is
+    already one complete app-media fragment. The receiver needs to return those
+    payloads and send ACK segments so the door keeps publishing. This is not a
+    general-purpose KCP implementation.
+    """
+
+    PUSH = 81
+    ACK = 82
+    HEADER_BYTES = 24
+
+    def __init__(self, conv_id: int) -> None:
+        self.conv_id = conv_id
+        self._outbound_handler: Callable[[Any, bytes], None] | None = None
+        self._received: list[bytes] = []
+        self._next_sequence = 0
+
+    def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
+        """Register a callback for outbound KCP segments."""
+
+        self._outbound_handler = handler
+
+    def enqueue(self, payload: bytes) -> None:
+        """Queue and immediately emit one PUSH segment."""
+
+        segment = self._encode_segment(self.PUSH, sequence=self._next_sequence, payload=payload)
+        self._next_sequence += 1
+        self._send(segment)
+
+    def flush(self) -> None:
+        """Compatibility no-op for the external KCP API."""
+
+    def receive(self, data: bytes) -> None:
+        """Process one or more KCP segments."""
+
+        offset = 0
+        while offset + self.HEADER_BYTES <= len(data):
+            conv_id = int.from_bytes(data[offset : offset + 4], "little", signed=False)
+            command = data[offset + 4]
+            timestamp = int.from_bytes(data[offset + 8 : offset + 12], "little", signed=False)
+            sequence = int.from_bytes(data[offset + 12 : offset + 16], "little", signed=False)
+            payload_len = int.from_bytes(data[offset + 20 : offset + 24], "little", signed=False)
+            body_start = offset + self.HEADER_BYTES
+            body_end = body_start + payload_len
+            if conv_id != self.conv_id or body_end > len(data):
+                return
+            if command == self.PUSH:
+                self._received.append(data[body_start:body_end])
+                self._send(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence))
+            offset = body_end
+
+    def get_all_received(self) -> list[bytes]:
+        """Return and clear received app payloads."""
+
+        received = self._received
+        self._received = []
+        return received
+
+    def update(self, timestamp_ms: int | None = None) -> None:
+        """Compatibility no-op for the external KCP API."""
+
+    def _encode_segment(
+        self,
+        command: int,
+        *,
+        timestamp: int = 0,
+        sequence: int,
+        payload: bytes = b"",
+    ) -> bytes:
+        return (
+            self.conv_id.to_bytes(4, "little")
+            + bytes([command, 0])
+            + (32).to_bytes(2, "little")
+            + timestamp.to_bytes(4, "little", signed=False)
+            + sequence.to_bytes(4, "little", signed=False)
+            + (0).to_bytes(4, "little")
+            + len(payload).to_bytes(4, "little", signed=False)
+            + payload
+        )
+
+    def _send(self, segment: bytes) -> None:
+        if self._outbound_handler is not None:
+            self._outbound_handler(self, segment)

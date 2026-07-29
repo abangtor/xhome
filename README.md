@@ -254,8 +254,9 @@ The repo also includes standalone debugging tools in `xhome.live_sidecar` for
 cloud probes, PCAP extraction, and temporary MJPEG serving outside Home
 Assistant. See `docs/XHOME_LIVE_SIDECAR.md`.
 
-The Home Assistant custom component installs `kcp>=0.1.6` because the embedded
-camera needs to ACK and reassemble the native KCP media stream.
+The Home Assistant custom component includes the small KCP subset it needs to
+ACK and reassemble the native media stream, so it does not require a separate
+KCP wheel at setup time.
 
 ## Development Roadmap
 

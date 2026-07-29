@@ -15,9 +15,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-live = [
-    "kcp>=0.1.6",
-]
 dev = [
     "homeassistant>=2024.6.0",
     "pytest>=8.0",

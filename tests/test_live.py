@@ -17,7 +17,7 @@ from xhome.live import (
     parse_live_app_media_packet,
     parse_media_frame,
 )
-from xhome.live_kcp import CONTROL_CONV_ID, MEDIA_CONV_ID, XHomeKcpChannels, strip_uid_suffix
+from xhome.live_kcp import CONTROL_CONV_ID, MEDIA_CONV_ID, MinimalKCP, XHomeKcpChannels, strip_uid_suffix
 from xhome.live_p2p import (
     P2PAddressKind,
     P2PPacketType,
@@ -417,6 +417,29 @@ class LiveTransportTests(unittest.TestCase):
 
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
         self.assertEqual(packet.channel, 2)
+
+    def test_minimal_kcp_receives_push_payload_and_sends_ack(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+        push = (
+            MEDIA_CONV_ID.to_bytes(4, "little")
+            + bytes([MinimalKCP.PUSH, 0])
+            + (32).to_bytes(2, "little")
+            + (1234).to_bytes(4, "little")
+            + (7).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (5).to_bytes(4, "little")
+            + b"frame"
+        )
+
+        kcp.receive(push)
+
+        self.assertEqual(kcp.get_all_received(), [b"frame"])
+        self.assertEqual(sent[0][:4], MEDIA_CONV_ID.to_bytes(4, "little"))
+        self.assertEqual(sent[0][4], MinimalKCP.ACK)
+        self.assertEqual(int.from_bytes(sent[0][8:12], "little"), 1234)
+        self.assertEqual(int.from_bytes(sent[0][12:16], "little"), 7)
 
     def test_unique_p2p_relays_dedupes_command_9_servers(self):
         relays = unique_p2p_relays(
