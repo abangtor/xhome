@@ -447,16 +447,7 @@ class LiveTransportTests(unittest.TestCase):
         sent = []
         kcp = MinimalKCP(MEDIA_CONV_ID)
         kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
-        push = (
-            MEDIA_CONV_ID.to_bytes(4, "little")
-            + bytes([MinimalKCP.PUSH, 0])
-            + (32).to_bytes(2, "little")
-            + (1234).to_bytes(4, "little")
-            + (7).to_bytes(4, "little")
-            + (0).to_bytes(4, "little")
-            + (5).to_bytes(4, "little")
-            + b"frame"
-        )
+        push = minimal_kcp_push(sequence=7, timestamp=1234, payload=b"frame")
 
         kcp.receive(push)
 
@@ -465,6 +456,19 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(sent[0][4], MinimalKCP.ACK)
         self.assertEqual(int.from_bytes(sent[0][8:12], "little"), 1234)
         self.assertEqual(int.from_bytes(sent[0][12:16], "little"), 7)
+
+    def test_minimal_kcp_orders_payloads_and_drops_duplicates(self):
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.include_outbound_handler(lambda _kcp, _payload: None)
+
+        kcp.receive(minimal_kcp_push(sequence=10, payload=b"first"))
+        kcp.receive(minimal_kcp_push(sequence=12, payload=b"third"))
+        kcp.receive(minimal_kcp_push(sequence=10, payload=b"duplicate"))
+        self.assertEqual(kcp.get_all_received(), [b"first"])
+
+        kcp.receive(minimal_kcp_push(sequence=11, payload=b"second"))
+
+        self.assertEqual(kcp.get_all_received(), [b"second", b"third"])
 
     def test_unique_p2p_relays_dedupes_command_9_servers(self):
         relays = unique_p2p_relays(
@@ -524,6 +528,19 @@ class FakeSocket:
 
     def settimeout(self, timeout):
         self.timeout = timeout
+
+
+def minimal_kcp_push(*, sequence: int, payload: bytes, timestamp: int = 0) -> bytes:
+    return (
+        MEDIA_CONV_ID.to_bytes(4, "little")
+        + bytes([MinimalKCP.PUSH, 0])
+        + (32).to_bytes(2, "little")
+        + timestamp.to_bytes(4, "little")
+        + sequence.to_bytes(4, "little")
+        + (0).to_bytes(4, "little")
+        + len(payload).to_bytes(4, "little")
+        + payload
+    )
 
 
 class LiveKcpTests(unittest.TestCase):

@@ -205,6 +205,8 @@ class MinimalKCP:
         self._outbound_handler: Callable[[Any, bytes], None] | None = None
         self._received: list[bytes] = []
         self._next_sequence = 0
+        self._expected_receive_sequence: int | None = None
+        self._pending_receive: dict[int, bytes] = {}
 
     def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
         """Register a callback for outbound KCP segments."""
@@ -236,7 +238,7 @@ class MinimalKCP:
             if conv_id != self.conv_id or body_end > len(data):
                 return
             if command == self.PUSH:
-                self._received.append(data[body_start:body_end])
+                self._queue_received(sequence, data[body_start:body_end])
                 self._send(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence))
             offset = body_end
 
@@ -268,6 +270,18 @@ class MinimalKCP:
             + len(payload).to_bytes(4, "little", signed=False)
             + payload
         )
+
+    def _queue_received(self, sequence: int, payload: bytes) -> None:
+        """Buffer PUSH payloads and emit them in KCP sequence order."""
+
+        if self._expected_receive_sequence is None:
+            self._expected_receive_sequence = sequence
+        if sequence < self._expected_receive_sequence:
+            return
+        self._pending_receive.setdefault(sequence, payload)
+        while self._expected_receive_sequence in self._pending_receive:
+            self._received.append(self._pending_receive.pop(self._expected_receive_sequence))
+            self._expected_receive_sequence += 1
 
     def _send(self, segment: bytes) -> None:
         if self._outbound_handler is not None:
