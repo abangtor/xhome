@@ -111,6 +111,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_mjpeg_last_ended_at: int | None = None
         self._live_mjpeg_last_duration: float | None = None
         self._live_mjpeg_last_end_reason: str | None = None
+        self._live_mjpeg_last_request_path: str | None = None
+        self._live_mjpeg_last_user_agent: str | None = None
         self._live_transport_stats: dict[str, Any] = {}
         self._live_last_state_write_at = 0.0
 
@@ -159,6 +161,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_mjpeg_last_ended_at": self._live_mjpeg_last_ended_at,
                 "live_mjpeg_last_duration": self._live_mjpeg_last_duration,
                 "live_mjpeg_last_end_reason": self._live_mjpeg_last_end_reason,
+                "live_mjpeg_last_request_path": self._live_mjpeg_last_request_path,
+                "live_mjpeg_last_user_agent": self._live_mjpeg_last_user_agent,
+                "live_mjpeg_debug_path": _native_mjpeg_path(
+                    self.coordinator.config_entry.entry_id,
+                    self.uid,
+                    self._stream_token,
+                ),
                 "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
                 "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
                 "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
@@ -290,6 +299,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_mjpeg_last_ended_at = None
         self._live_mjpeg_last_duration = None
         self._live_mjpeg_last_end_reason = None
+        self._live_mjpeg_last_request_path = str(request.rel_url)
+        self._live_mjpeg_last_user_agent = (request.headers.get("User-Agent") or "")[:160] or None
         self._write_live_state(force=True)
 
         thread = Thread(
@@ -503,7 +514,13 @@ def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> No
 def _native_mjpeg_url(hass: HomeAssistant, entry_id: str, uid: str, token: str) -> str:
     """Return an absolute internal MJPEG URL for Home Assistant's stream worker."""
 
-    return f"{get_url(hass, prefer_external=False)}/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
+    return f"{get_url(hass, prefer_external=False)}{_native_mjpeg_path(entry_id, uid, token)}"
+
+
+def _native_mjpeg_path(entry_id: str, uid: str, token: str) -> str:
+    """Return the tokenized internal MJPEG path for direct debug access."""
+
+    return f"/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
 
 
 def _peer_label(peer: Any) -> str | None:
