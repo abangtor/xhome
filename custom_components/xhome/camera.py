@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from threading import Event, Thread
 from typing import Any
 
 from aiohttp import web
 from homeassistant.components.camera import Camera
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.network import get_url
 
 from .api.live import LiveAppMediaFrame, LiveSessionMetadata, MediaType
 from .api.live_p2p import XHomeP2PRendezvousProbe
@@ -23,6 +26,8 @@ from .entity import XHomeEntity
 from .helpers import redact_uid
 
 LOGGER = logging.getLogger(__name__)
+DATA_LIVE_CAMERAS = f"{DOMAIN}_live_cameras"
+DATA_LIVE_VIEW_REGISTERED = f"{DOMAIN}_live_view_registered"
 MJPEG_BOUNDARY = b"xhome"
 MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
@@ -36,7 +41,21 @@ async def async_setup_entry(
     """Set up XHome camera entities."""
 
     coordinator: XHomeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(XHomeLiveCamera(coordinator, uid) for uid in coordinator.data.devices)
+    registry = hass.data.setdefault(DATA_LIVE_CAMERAS, {})
+    if not hass.data.get(DATA_LIVE_VIEW_REGISTERED):
+        hass.http.register_view(XHomeLiveMjpegView(registry))
+        hass.data[DATA_LIVE_VIEW_REGISTERED] = True
+
+    entities = [XHomeLiveCamera(coordinator, uid) for uid in coordinator.data.devices]
+    for entity in entities:
+        registry[(entry.entry_id, entity.uid, entity.stream_token)] = entity
+
+    def cleanup_live_cameras() -> None:
+        for entity in entities:
+            registry.pop((entry.entry_id, entity.uid, entity.stream_token), None)
+
+    entry.async_on_unload(cleanup_live_cameras)
+    async_add_entities(entities)
 
 
 class XHomeLiveCamera(XHomeEntity, Camera):
@@ -52,6 +71,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         Camera.__init__(self)
         XHomeEntity.__init__(self, coordinator, uid, "live_camera")
         self._last_live_jpeg: bytes | None = None
+        self._stream_token = secrets.token_urlsafe(24)
+
+    @property
+    def stream_token(self) -> str:
+        """Return the opaque internal MJPEG stream token."""
+
+        return self._stream_token
 
     @property
     def available(self) -> bool:
@@ -81,11 +107,13 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         return {key: value for key, value in attrs.items() if value is not None}
 
     async def stream_source(self) -> str | None:
-        """Return the optional configured external stream URL for Home Assistant."""
+        """Return the embedded or optional external MJPEG stream URL."""
 
         template = live_stream_url_template(self.coordinator.config_entry.options)
-        if not template or self.device_data is None:
+        if self.device_data is None:
             return None
+        if not template:
+            return _native_mjpeg_url(self.hass, self.coordinator.config_entry.entry_id, self.uid, self._stream_token)
         return render_live_stream_url(
             template,
             uid=self.uid,
@@ -192,6 +220,27 @@ def render_live_stream_url(
     return template.format_map(_SafeFormatMap(values))
 
 
+class XHomeLiveMjpegView(HomeAssistantView):
+    """Internal MJPEG endpoint used as the camera stream source."""
+
+    url = "/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
+    name = "api:xhome:live"
+    requires_auth = False
+
+    def __init__(self, registry: dict[tuple[str, str, str], XHomeLiveCamera]) -> None:
+        """Initialize the internal stream view."""
+
+        self._registry = registry
+
+    async def get(self, request: web.Request, entry_id: str, uid: str, token: str) -> web.StreamResponse:
+        """Serve one camera's native MJPEG stream."""
+
+        camera = self._registry.get((entry_id, uid, token))
+        if camera is None:
+            raise web.HTTPNotFound()
+        return await camera.handle_async_mjpeg_stream(request)
+
+
 class _SafeFormatMap(dict[str, str]):
     """Leave unknown placeholders intact for sidecar-specific routing."""
 
@@ -211,6 +260,12 @@ def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> No
         frame_queue.put_nowait(frame)
     except asyncio.QueueFull:
         pass
+
+
+def _native_mjpeg_url(hass: HomeAssistant, entry_id: str, uid: str, token: str) -> str:
+    """Return an absolute internal MJPEG URL for Home Assistant's stream worker."""
+
+    return f"{get_url(hass, prefer_external=False)}/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
 
 
 def _run_native_mjpeg_worker(
