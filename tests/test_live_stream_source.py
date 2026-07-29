@@ -28,6 +28,8 @@ class LiveStreamSourceTests(unittest.TestCase):
 
         self.assertIn("class XHomeLiveCamera", camera_source)
         self.assertIn("async def handle_async_mjpeg_stream", camera_source)
+        self.assertIn("async def async_camera_image", camera_source)
+        self.assertIn("_last_live_jpeg", camera_source)
         self.assertIn("async def stream_source", camera_source)
         self.assertIn("render_live_stream_url", camera_source)
         self.assertIn('"embedded_live_stream": True', camera_source)

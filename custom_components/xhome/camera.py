@@ -44,12 +44,14 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
     _attr_translation_key = "live_camera"
     _attr_should_poll = False
+    _attr_content_type = "image/jpeg"
 
     def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
         """Initialize the live camera entity."""
 
         Camera.__init__(self)
         XHomeEntity.__init__(self, coordinator, uid, "live_camera")
+        self._last_live_jpeg: bytes | None = None
 
     @property
     def available(self) -> bool:
@@ -106,7 +108,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         def on_frame(frame: LiveAppMediaFrame) -> None:
             if frame.media_type != MediaType.JPEG_FRAME:
                 return
-            loop.call_soon_threadsafe(_replace_latest_frame, frame_queue, frame.payload)
+            loop.call_soon_threadsafe(self._handle_live_jpeg, frame_queue, frame.payload)
 
         thread = Thread(
             target=_run_native_mjpeg_worker,
@@ -150,6 +152,19 @@ class XHomeLiveCamera(XHomeEntity, Camera):
             await self.hass.async_add_executor_job(thread.join, 2)
 
         return response
+
+    async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
+        """Return the latest live JPEG, falling back to latest event image."""
+
+        if self._last_live_jpeg is not None:
+            return self._last_live_jpeg
+        return await self.coordinator.async_get_latest_event_image(self.uid)
+
+    def _handle_live_jpeg(self, frame_queue: asyncio.Queue[bytes], frame: bytes) -> None:
+        """Cache one live JPEG and queue it for the MJPEG response."""
+
+        self._last_live_jpeg = frame
+        _replace_latest_frame(frame_queue, frame)
 
 
 def live_stream_url_template(options: dict[str, Any]) -> str:
