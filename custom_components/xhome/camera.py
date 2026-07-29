@@ -113,6 +113,10 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_mjpeg_last_end_reason: str | None = None
         self._live_mjpeg_last_request_path: str | None = None
         self._live_mjpeg_last_user_agent: str | None = None
+        self._live_mjpeg_stream_generation = 0
+        self._live_native_stop_commands_sent = 0
+        self._live_native_stop_commands_skipped = 0
+        self._live_native_stop_commands_failed = 0
         self._live_transport_stats: dict[str, Any] = {}
         self._live_last_state_write_at = 0.0
 
@@ -168,6 +172,10 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     self.uid,
                     self._stream_token,
                 ),
+                "live_mjpeg_stream_generation": self._live_mjpeg_stream_generation,
+                "live_native_control_stop_commands_sent": self._live_native_stop_commands_sent,
+                "live_native_control_stop_commands_skipped": self._live_native_stop_commands_skipped,
+                "live_native_control_stop_commands_failed": self._live_native_stop_commands_failed,
                 "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
                 "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
                 "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
@@ -281,7 +289,12 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         def on_stats(stats: dict[str, Any]) -> None:
             loop.call_soon_threadsafe(self._handle_live_transport_stats, stats)
 
+        def on_native_stop(status: str) -> None:
+            loop.call_soon_threadsafe(self._handle_live_native_stop, status)
+
         self._live_streams_started += 1
+        self._live_mjpeg_stream_generation += 1
+        stream_generation = self._live_mjpeg_stream_generation
         self._live_frames = 0
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
@@ -305,7 +318,15 @@ class XHomeLiveCamera(XHomeEntity, Camera):
 
         thread = Thread(
             target=_run_native_mjpeg_worker,
-            args=(session, on_frame, on_error, on_stats, stop_event),
+            args=(
+                session,
+                on_frame,
+                on_error,
+                on_stats,
+                stop_event,
+                lambda generation=stream_generation: self._live_mjpeg_stream_generation == generation,
+                on_native_stop,
+            ),
             name=f"xhome-live-{redact_uid(self.uid)}",
             daemon=True,
         )
@@ -466,6 +487,17 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_transport_stats = stats
         self._write_live_state()
 
+    def _handle_live_native_stop(self, status: str) -> None:
+        """Track native stop commands skipped for stale MJPEG clients."""
+
+        if status == "sent":
+            self._live_native_stop_commands_sent += 1
+        elif status == "skipped":
+            self._live_native_stop_commands_skipped += 1
+        elif status == "failed":
+            self._live_native_stop_commands_failed += 1
+        self._write_live_state(force=True)
+
     def _write_live_state(self, *, force: bool = False) -> None:
         """Write live diagnostics to HA state at a throttled cadence."""
 
@@ -537,6 +569,8 @@ def _run_native_mjpeg_worker(
     on_error: Any,
     on_stats: Any,
     stop_event: Event,
+    should_send_stop: Any | None = None,
+    on_native_stop: Any | None = None,
 ) -> None:
     """Run one blocking native live session for the MJPEG response."""
 
@@ -585,10 +619,16 @@ def _run_native_mjpeg_worker(
                     stop_event=stop_event,
                 )
             finally:
-                try:
-                    transport.send_frame(metadata.stop_command)
-                except Exception as err:  # noqa: BLE001
-                    LOGGER.debug("XHome native live stop command failed: %s", err)
+                stop_status = "skipped"
+                if should_send_stop is None or should_send_stop():
+                    stop_status = "failed"
+                    try:
+                        transport.send_frame(metadata.stop_command)
+                        stop_status = "sent"
+                    except Exception as err:  # noqa: BLE001
+                        LOGGER.debug("XHome native live stop command failed: %s", err)
+                if on_native_stop is not None:
+                    on_native_stop(stop_status)
     except Exception as err:  # noqa: BLE001
         message = str(err)
         on_error(message)
