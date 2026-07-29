@@ -234,15 +234,8 @@ Home Assistant opens the `Live camera`, the integration fetches a fresh live
 token, starts the native rendezvous worker in-process, and serves the received
 JPEG frames as MJPEG.
 
-The option `Live stream URL template` remains as an escape hatch for experiments
-with an external bridge or go2rtc, for example:
-
-```text
-rtsp://homeassistant.local:8554/xhome/{uid_tail}
-```
-
-Supported placeholders are `{uid}`, `{uid_tail}`, `{device_id}`, and `{model}`.
-The camera entity does not expose live tokens in state.
+The camera entity always uses the embedded stream path and does not expose live
+tokens in state.
 
 For bridge development, call the response service `xhome.prepare_live_stream`
 with `uid` and `confirm: true`. It returns the live token, native IoT host, start

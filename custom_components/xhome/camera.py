@@ -119,20 +119,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         return {key: value for key, value in attrs.items() if value is not None}
 
     async def stream_source(self) -> str | None:
-        """Return the embedded or optional external MJPEG stream URL."""
+        """Return the embedded MJPEG stream URL."""
 
-        template = live_stream_url_template(self.coordinator.config_entry.options)
         if self.device_data is None:
             return None
-        if not template:
-            return _native_mjpeg_url(self.hass, self.coordinator.config_entry.entry_id, self.uid, self._stream_token)
-        return render_live_stream_url(
-            template,
-            uid=self.uid,
-            uid_tail=redact_uid(self.uid),
-            device_id=self.device_data.device_id,
-            model=self.device_data.model,
-        )
+        return _native_mjpeg_url(self.hass, self.coordinator.config_entry.entry_id, self.uid, self._stream_token)
 
     async def handle_async_mjpeg_stream(self, request: web.Request) -> web.StreamResponse:
         """Serve a native XHome live session as a Home Assistant MJPEG stream."""

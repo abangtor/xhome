@@ -140,8 +140,8 @@ python -m xhome.live_sidecar mjpeg-server \
   --insecure-skip-verify
 ```
 
-For experiments, the Home Assistant XHome option `Live stream URL template` can
-still point to this temporary URL:
+For experiments outside the embedded camera entity, point a browser or a
+separate test client at this temporary URL:
 
 ```text
 http://SIDECAR_HOST:8088/xhome.mjpeg
