@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import secrets
 import time
@@ -10,13 +11,12 @@ from threading import Event, Thread
 from typing import Any
 
 from aiohttp import web
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import Camera
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.network import get_url
 
 from .api.live import ControlCommand, LiveAppMediaFrame, LiveSessionMetadata, MediaType
 from .api.live_p2p import XHomeP2PRendezvousProbe
@@ -39,6 +39,8 @@ MJPEG_BOUNDARY = b"xhome"
 MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
 MJPEG_NEXT_FRAME_TIMEOUT = 15.0
+MJPEG_VIEW_RECONNECT_INTERVAL = 20.0
+MJPEG_VIEW_PROMOTE_TIMEOUT = 3.5
 LIVE_STATE_WRITE_INTERVAL = 2.0
 NATIVE_CONTROL_KEEPALIVE_INTERVAL = 12.0
 NATIVE_CONTROL_READ_INTERVAL = 2.0
@@ -64,6 +66,7 @@ async def async_setup_entry(
     registry = hass.data.setdefault(DATA_LIVE_CAMERAS, {})
     if not hass.data.get(DATA_LIVE_VIEW_REGISTERED):
         hass.http.register_view(XHomeLiveMjpegView(registry))
+        hass.http.register_view(XHomeLiveMjpegViewerView(registry))
         hass.data[DATA_LIVE_VIEW_REGISTERED] = True
 
     entities = [XHomeLiveCamera(coordinator, uid) for uid in coordinator.data.devices]
@@ -85,7 +88,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
     _attr_should_poll = False
     _attr_content_type = "image/jpeg"
     _attr_frame_interval = 0.2
-    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
         """Initialize the live camera entity."""
@@ -173,6 +175,12 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     self.uid,
                     self._stream_token,
                 ),
+                "live_mjpeg_view_path": _native_mjpeg_view_path(
+                    self.coordinator.config_entry.entry_id,
+                    self.uid,
+                    self._stream_token,
+                ),
+                "live_mjpeg_view_reconnect_seconds": MJPEG_VIEW_RECONNECT_INTERVAL,
                 "live_mjpeg_stream_generation": self._live_mjpeg_stream_generation,
                 "live_native_control_stop_commands_sent": self._live_native_stop_commands_sent,
                 "live_native_control_stop_commands_skipped": self._live_native_stop_commands_skipped,
@@ -260,13 +268,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         if data is not None and data.device_id is not None:
             attrs["device_id"] = data.device_id
         return {key: value for key, value in attrs.items() if value is not None}
-
-    async def stream_source(self) -> str | None:
-        """Return the embedded MJPEG stream URL."""
-
-        if self.device_data is None:
-            return None
-        return _native_mjpeg_url(self.hass, self.coordinator.config_entry.entry_id, self.uid, self._stream_token)
 
     async def handle_async_mjpeg_stream(self, request: web.Request) -> web.StreamResponse:
         """Serve a native XHome live session as a Home Assistant MJPEG stream."""
@@ -530,6 +531,34 @@ class XHomeLiveMjpegView(HomeAssistantView):
         return await camera.handle_async_mjpeg_stream(request)
 
 
+class XHomeLiveMjpegViewerView(HomeAssistantView):
+    """Small browser-safe viewer for the tokenized MJPEG endpoint."""
+
+    url = "/api/xhome/live-view/{entry_id}/{uid}/{token}"
+    name = "api:xhome:live_view"
+    requires_auth = False
+
+    def __init__(self, registry: dict[tuple[str, str, str], XHomeLiveCamera]) -> None:
+        """Initialize the internal viewer view."""
+
+        self._registry = registry
+
+    async def get(self, request: web.Request, entry_id: str, uid: str, token: str) -> web.Response:
+        """Serve a reconnecting HTML wrapper around one camera's MJPEG stream."""
+
+        if self._registry.get((entry_id, uid, token)) is None:
+            raise web.HTTPNotFound()
+        return web.Response(
+            text=_native_mjpeg_view_html(_native_mjpeg_path(entry_id, uid, token)),
+            content_type="text/html",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "X-Frame-Options": "SAMEORIGIN",
+            },
+        )
+
+
 def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> None:
     """Keep only the newest frame when the browser reads slowly."""
 
@@ -544,16 +573,116 @@ def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> No
         pass
 
 
-def _native_mjpeg_url(hass: HomeAssistant, entry_id: str, uid: str, token: str) -> str:
-    """Return an absolute internal MJPEG URL for Home Assistant's stream worker."""
-
-    return f"{get_url(hass, prefer_external=False)}{_native_mjpeg_path(entry_id, uid, token)}"
-
-
 def _native_mjpeg_path(entry_id: str, uid: str, token: str) -> str:
     """Return the tokenized internal MJPEG path for direct debug access."""
 
     return f"/api/xhome/live/{entry_id}/{uid}/{token}.mjpeg"
+
+
+def _native_mjpeg_view_path(entry_id: str, uid: str, token: str) -> str:
+    """Return the tokenized browser-safe MJPEG viewer path."""
+
+    return f"/api/xhome/live-view/{entry_id}/{uid}/{token}"
+
+
+def _native_mjpeg_view_html(stream_path: str) -> str:
+    """Return a minimal viewer that reconnects before browser MJPEG cancellation."""
+
+    reconnect_ms = int(MJPEG_VIEW_RECONNECT_INTERVAL * 1000)
+    promote_ms = int(MJPEG_VIEW_PROMOTE_TIMEOUT * 1000)
+    stream_path_json = json.dumps(stream_path)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XHome Live Camera</title>
+<style>
+html,
+body {{
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050505;
+}}
+.stream {{
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  background: #050505;
+}}
+.pending {{
+  opacity: 0;
+}}
+</style>
+</head>
+<body>
+<script>
+const streamPath = {stream_path_json};
+const reconnectMs = {reconnect_ms};
+const promoteMs = {promote_ms};
+let activeImage = null;
+let reconnectTimer = null;
+let streamIndex = 0;
+
+function streamUrl() {{
+  const separator = streamPath.indexOf("?") === -1 ? "?" : "&";
+  return streamPath + separator + "viewer=" + Date.now() + "-" + streamIndex++;
+}}
+
+function clearImage(image) {{
+  image.removeAttribute("src");
+  image.remove();
+}}
+
+function promote(image) {{
+  if (image.dataset.promoted === "1") {{
+    return;
+  }}
+  image.dataset.promoted = "1";
+  image.className = "stream";
+  const previous = activeImage;
+  activeImage = image;
+  if (previous && previous !== image) {{
+    window.setTimeout(() => clearImage(previous), 250);
+  }}
+  window.clearTimeout(reconnectTimer);
+  reconnectTimer = window.setTimeout(openStream, reconnectMs);
+}}
+
+function openStream() {{
+  const image = new Image();
+  image.className = activeImage ? "stream pending" : "stream";
+  image.alt = "";
+  image.decoding = "async";
+  image.onload = () => promote(image);
+  image.onerror = () => {{
+    if (image.dataset.promoted !== "1") {{
+      clearImage(image);
+    }}
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = window.setTimeout(openStream, 1000);
+  }};
+  document.body.appendChild(image);
+  image.src = streamUrl();
+  window.setTimeout(() => promote(image), promoteMs);
+}}
+
+window.addEventListener("pagehide", () => {{
+  window.clearTimeout(reconnectTimer);
+  for (const image of document.querySelectorAll("img.stream")) {{
+    image.removeAttribute("src");
+  }}
+}});
+
+openStream();
+</script>
+</body>
+</html>
+"""
 
 
 def _peer_label(peer: Any) -> str | None:

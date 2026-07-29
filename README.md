@@ -237,6 +237,13 @@ The camera entity always uses the embedded stream path and does not expose live
 tokens in state. The old external bridge/URL-template setup path has been
 removed from the Home Assistant integration.
 
+Some Firefox/Home Assistant frontend combinations cancel long-running MJPEG
+camera requests after roughly 30 seconds. For that case, the live camera exposes
+`live_mjpeg_view_path`, a tokenized built-in viewer page that reconnects the
+MJPEG image before the browser cancels it. Add that path to a Home Assistant
+Webpage card when the normal camera card freezes but the live diagnostics show
+frames are still being written.
+
 The repo still includes standalone debugging tools in `xhome.live_sidecar` for
 cloud probes, PCAP extraction, and temporary MJPEG serving outside Home
 Assistant. They are for reverse engineering and troubleshooting, not normal HA
