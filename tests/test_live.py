@@ -126,6 +126,21 @@ class LiveFrameTests(unittest.TestCase):
         self.assertTrue(packet.starts_frame)
         self.assertEqual(packet.payload, b"jpg")
 
+    def test_parse_live_app_media_packet_uses_declared_length_for_final_jpeg_tail(self):
+        jpeg_tail = b"body" + (b"x" * 26) + b"\xff\xd9"
+        header = bytearray(20)
+        header[:4] = (8).to_bytes(4, "little")
+        header[4:8] = (len(jpeg_tail) + 12).to_bytes(4, "little")
+        header[11] = MediaType.JPEG_FRAME
+        header[15] = 2
+        header[16:20] = (len(jpeg_tail) - 28).to_bytes(4, "little")
+
+        packet = parse_live_app_media_packet(bytes(header) + jpeg_tail)
+
+        self.assertTrue(packet.ends_frame)
+        self.assertEqual(packet.payload, jpeg_tail)
+        self.assertTrue(packet.payload.endswith(b"\xff\xd9"))
+
     def test_live_app_media_assembler_returns_frame_on_end_fragment(self):
         def packet(flag: int, payload: bytes) -> object:
             header = bytearray(20)

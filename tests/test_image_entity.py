@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import importlib.util
-from io import BytesIO
 from pathlib import Path
 import sys
 import types
@@ -104,19 +103,6 @@ class ImageEntityTests(unittest.TestCase):
 
     def test_rotate_image_bytes_noops_without_rotation(self):
         self.assertEqual(image.rotate_image_bytes(b"not really an image", 0, "image/jpeg"), b"not really an image")
-
-    def test_rotate_image_bytes_accepts_truncated_live_jpeg(self):
-        try:
-            from PIL import Image
-        except ImportError:
-            self.skipTest("Pillow is not installed")
-
-        source = BytesIO()
-        Image.new("RGB", (8, 4), "red").save(source, format="JPEG")
-        rotated = image.rotate_image_bytes(source.getvalue()[:-1], 90, "image/jpeg")
-
-        with Image.open(BytesIO(rotated)) as rotated_image:
-            self.assertEqual(rotated_image.size, (4, 8))
 
 
 if __name__ == "__main__":
