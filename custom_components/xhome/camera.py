@@ -38,6 +38,7 @@ DATA_LIVE_VIEW_REGISTERED = f"{DOMAIN}_live_view_registered"
 MJPEG_BOUNDARY = b"xhome"
 MJPEG_STREAM_DURATION = 3600.0
 MJPEG_FIRST_FRAME_TIMEOUT = 30.0
+MJPEG_NEXT_FRAME_TIMEOUT = 15.0
 LIVE_STATE_WRITE_INTERVAL = 2.0
 
 
@@ -203,10 +204,14 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         try:
             while not stop_event.is_set():
                 try:
-                    frame = await asyncio.wait_for(frame_queue.get(), timeout=MJPEG_FIRST_FRAME_TIMEOUT)
+                    frame_timeout = MJPEG_FIRST_FRAME_TIMEOUT if self._live_frames == 0 else MJPEG_NEXT_FRAME_TIMEOUT
+                    frame = await asyncio.wait_for(frame_queue.get(), timeout=frame_timeout)
                 except TimeoutError:
                     if self._live_frames == 0:
                         self._handle_live_error("Timed out waiting for first live JPEG frame")
+                    else:
+                        self._handle_live_error("Timed out waiting for next live JPEG frame")
+                        break
                     if not thread.is_alive():
                         break
                     continue

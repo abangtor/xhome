@@ -239,7 +239,8 @@ class MinimalKCP:
                 return
             if command == self.PUSH:
                 self._queue_received(sequence, data[body_start:body_end])
-                self._send(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence))
+                una = self._expected_receive_sequence if self._expected_receive_sequence is not None else sequence + 1
+                self._send(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence, una=una))
             offset = body_end
 
     def get_all_received(self) -> list[bytes]:
@@ -258,6 +259,7 @@ class MinimalKCP:
         *,
         timestamp: int = 0,
         sequence: int,
+        una: int = 0,
         payload: bytes = b"",
     ) -> bytes:
         return (
@@ -266,7 +268,7 @@ class MinimalKCP:
             + (32).to_bytes(2, "little")
             + timestamp.to_bytes(4, "little", signed=False)
             + sequence.to_bytes(4, "little", signed=False)
-            + (0).to_bytes(4, "little")
+            + una.to_bytes(4, "little", signed=False)
             + len(payload).to_bytes(4, "little", signed=False)
             + payload
         )
