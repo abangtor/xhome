@@ -346,6 +346,7 @@ class XHomeP2PRendezvousProbe:
         g711_out: Path | None = None,
         jpeg_dir: Path | None = None,
         on_frame: Callable[[LiveAppMediaFrame], None] | None = None,
+        on_stats: Callable[[dict[str, Any]], None] | None = None,
         on_ready: Callable[[], None] | None = None,
         stop_event: Any | None = None,
     ) -> dict[str, Any]:
@@ -384,6 +385,7 @@ class XHomeP2PRendezvousProbe:
                 g711_out=g711_out,
                 jpeg_dir=jpeg_dir,
                 on_frame=on_frame,
+                on_stats=on_stats,
             )
             next_kcp_start = 0.0
             next_discovery = 0.0
@@ -617,11 +619,13 @@ class KcpMediaProbe:
         g711_out: Path | None = None,
         jpeg_dir: Path | None = None,
         on_frame: Callable[[LiveAppMediaFrame], None] | None = None,
+        on_stats: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.uid = uid
         self.sock = sock
         self.jpeg_dir = jpeg_dir
         self.on_frame = on_frame
+        self.on_stats = on_stats
         self.h264_stream = open_output(h264_out)
         self.g711_stream = open_output(g711_out)
         if self.jpeg_dir:
@@ -636,6 +640,8 @@ class KcpMediaProbe:
         self.g711_frames = 0
         self.jpeg_frames = 0
         self.first_payloads: list[dict[str, Any]] = []
+        self._last_stats_frame_count = -1
+        self._last_stats_payload_bucket = -1
 
     def close(self) -> None:
         if self.h264_stream is not None:
@@ -662,9 +668,11 @@ class KcpMediaProbe:
                     if kcp_channel != MEDIA_CHANNEL:
                         continue
                     self._handle_media_payload(payload)
+                    self._emit_stats()
                     channel.update()
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
+            self._emit_stats()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -734,6 +742,23 @@ class KcpMediaProbe:
             self.jpeg_frames += 1
             if self.jpeg_dir is not None:
                 (self.jpeg_dir / f"frame-{self.jpeg_frames:06d}.jpg").write_bytes(frame.payload)
+        self._emit_stats()
+
+    def _emit_stats(self) -> None:
+        """Publish a compact snapshot of current media counters."""
+
+        if self.on_stats is None:
+            return
+        payload_bucket = self.kcp_payloads // 50
+        if (
+            self.error is not None
+            or self.frames != self._last_stats_frame_count
+            or self.kcp_payloads <= 5
+            or payload_bucket != self._last_stats_payload_bucket
+        ):
+            self._last_stats_frame_count = self.frames
+            self._last_stats_payload_bucket = payload_bucket
+            self.on_stats(self.as_dict())
 
 
 def native_payload_summary(payload: bytes) -> dict[str, Any]:

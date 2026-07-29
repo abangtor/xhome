@@ -82,6 +82,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_started_at: int | None = None
         self._live_last_frame_at: int | None = None
         self._live_last_error: str | None = None
+        self._live_transport_stats: dict[str, Any] = {}
 
     @property
     def stream_token(self) -> str:
@@ -115,6 +116,11 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_frames": self._live_frames,
                 "live_rotated_frames": self._live_rotated_frames,
                 "live_rotation_failures": self._live_rotation_failures,
+                "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
+                "live_app_packets": self._live_transport_stats.get("app_packets"),
+                "live_p2p_frames": self._live_transport_stats.get("frames"),
+                "live_p2p_jpeg_frames": self._live_transport_stats.get("jpeg_frames"),
+                "live_media_probe_error": self._live_transport_stats.get("error"),
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
                 "live_last_error": self._live_last_error,
@@ -150,14 +156,22 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         def on_error(message: str) -> None:
             loop.call_soon_threadsafe(self._handle_live_error, message)
 
+        def on_stats(stats: dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(self._handle_live_transport_stats, stats)
+
         self._live_streams_started += 1
+        self._live_frames = 0
+        self._live_rotated_frames = 0
+        self._live_rotation_failures = 0
         self._live_last_started_at = int(time.time())
+        self._live_last_frame_at = None
         self._live_last_error = None
+        self._live_transport_stats = {}
         self.async_write_ha_state()
 
         thread = Thread(
             target=_run_native_mjpeg_worker,
-            args=(session, on_frame, on_error, stop_event),
+            args=(session, on_frame, on_error, on_stats, stop_event),
             name=f"xhome-live-{redact_uid(self.uid)}",
             daemon=True,
         )
@@ -178,6 +192,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 try:
                     frame = await asyncio.wait_for(frame_queue.get(), timeout=MJPEG_FIRST_FRAME_TIMEOUT)
                 except TimeoutError:
+                    if self._live_frames == 0:
+                        self._handle_live_error("Timed out waiting for first live JPEG frame")
                     if not thread.is_alive():
                         break
                     continue
@@ -245,6 +261,12 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         """Store one native live stream error for diagnostics."""
 
         self._live_last_error = message
+        self.async_write_ha_state()
+
+    def _handle_live_transport_stats(self, stats: dict[str, Any]) -> None:
+        """Store compact native media pipeline counters for diagnostics."""
+
+        self._live_transport_stats = stats
         self.async_write_ha_state()
 
 
@@ -325,6 +347,7 @@ def _run_native_mjpeg_worker(
     session: XHomeLiveStreamSession,
     on_frame: Any,
     on_error: Any,
+    on_stats: Any,
     stop_event: Event,
 ) -> None:
     """Run one blocking native live session for the MJPEG response."""
@@ -360,6 +383,7 @@ def _run_native_mjpeg_worker(
                 ).run(
                     duration=MJPEG_STREAM_DURATION,
                     on_frame=on_frame,
+                    on_stats=on_stats,
                     stop_event=stop_event,
                 )
             finally:
