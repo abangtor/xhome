@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,6 +47,7 @@ from xhome.live_transport import (
     decode_native_frame_header,
     encode_native_frame,
     extract_p2p_servers,
+    make_ssl_context,
 )
 
 
@@ -313,6 +315,14 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(command, 10001)
         self.assertEqual(payload_len, len(payload))
         self.assertEqual(frame[8:], payload)
+
+    def test_native_tls_context_is_app_compatible(self):
+        context = make_ssl_context(verify_tls=False)
+
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, ssl.CERT_NONE)
+        if hasattr(ssl, "TLSVersion"):
+            self.assertEqual(context.maximum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_extract_p2p_servers_from_command_9(self):
         from xhome.live_transport import NativeFrame

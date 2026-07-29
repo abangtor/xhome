@@ -162,10 +162,23 @@ def make_ssl_context(*, verify_tls: bool) -> ssl.SSLContext:
     """Return an SSL context for the native IoT socket."""
 
     if verify_tls:
-        return ssl.create_default_context()
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
+        context = ssl.create_default_context()
+    else:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+    # The native IVIEWS client behaves like a TLS-1.2-era OpenSSL client. Some
+    # Home Assistant/OpenSSL builds otherwise negotiate into a server-side
+    # handshake_failure alert before certificate verification even matters.
+    try:
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+    except (AttributeError, ValueError):
+        pass
+    try:
+        context.set_ciphers("DEFAULT:@SECLEVEL=0")
+    except ssl.SSLError:
+        pass
     return context
 
 
