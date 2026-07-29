@@ -354,7 +354,8 @@ class XHomeP2PRendezvousProbe:
         relay_touch_interval: float = 2.0,
         relay_touch_time_offset: float = 0.0,
         relay_info_burst_size: int = 4,
-        relay_heartbeat_interval: float = 1.0,
+        relay_heartbeat_burst_size: int = 2,
+        relay_heartbeat_interval: float = 2.0,
         heartbeat_interval: float = 2.0,
         h264_out: Path | None = None,
         g711_out: Path | None = None,
@@ -469,11 +470,16 @@ class XHomeP2PRendezvousProbe:
                         candidate for candidate in candidates.values() if candidate.kind == P2PAddressKind.RELAY
                     ]
                     relay_addresses = {candidate.address for candidate in relay_candidates}
-                    direct_touch_targets = {
-                        candidate.address for candidate in candidates.values() if candidate.kind != P2PAddressKind.RELAY
-                    }
-                    if selected_peer is not None and selected_peer not in relay_addresses:
-                        direct_touch_targets.add(selected_peer)
+                    if selected_peer is None:
+                        direct_touch_targets = {
+                            candidate.address
+                            for candidate in candidates.values()
+                            if candidate.kind == P2PAddressKind.LOCAL
+                        }
+                    elif selected_peer not in relay_addresses:
+                        direct_touch_targets = {selected_peer}
+                    else:
+                        direct_touch_targets = set()
                     if direct_touch_targets and now >= next_direct_touch:
                         for target in direct_touch_targets:
                             for _ in range(direct_touch_burst_size):
@@ -516,9 +522,10 @@ class XHomeP2PRendezvousProbe:
 
                     if now >= next_relay_heartbeat:
                         for target in self.relays:
-                            sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), target)
-                            sent_counts["heartbeat"] += 1
-                            sent_counts["relay_heartbeat"] += 1
+                            for _ in range(relay_heartbeat_burst_size):
+                                sock.sendto(encode_udp_packet(P2PPacketType.HEARTBEAT, heartbeat_payload), target)
+                                sent_counts["heartbeat"] += 1
+                                sent_counts["relay_heartbeat"] += 1
                         next_relay_heartbeat = now + relay_heartbeat_interval
 
                     if selected_peer is not None and now >= next_peer_heartbeat:
