@@ -162,6 +162,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_p2p_loop_ticks": self._live_transport_stats.get("loop_ticks"),
                 "live_p2p_selected_peer": _peer_label(selected_peer),
                 "live_p2p_sent_heartbeats": sent.get("heartbeat"),
+                "live_p2p_sent_relay_heartbeats": sent.get("relay_heartbeat"),
+                "live_p2p_sent_peer_heartbeats": sent.get("peer_heartbeat"),
                 "live_p2p_sent_direct_touches": sent.get("direct_touch_channel4"),
                 "live_p2p_sent_relay_info": sent.get("relay_info"),
                 "live_p2p_sent_relay_touches": sent.get("relay_touch_channel4"),
