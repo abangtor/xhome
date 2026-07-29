@@ -661,9 +661,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                     ),
                 )
                 self._local_push_client = push_client
+                self._local_push_registered_token = None
                 self._local_push_status.update(
                     {
                         "running": True,
+                        "registered": False,
                         "last_error": None,
                         "push_host": client.region.push_host,
                     }

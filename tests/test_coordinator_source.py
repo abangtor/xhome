@@ -33,6 +33,12 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn('"last_frame_command"', source)
         self.assertIn('"events"', source)
 
+    def test_local_push_worker_reregisters_token_after_reconnect(self):
+        source = _function_source("_local_push_worker")
+
+        self.assertIn("self._local_push_registered_token = None", source)
+        self.assertIn('"registered": False', source)
+
     def test_device_refresh_retries_no_user_by_refreshing_token(self):
         source = _function_source("_update_data")
 
