@@ -234,7 +234,7 @@ def detect_live_rotation_edge_crop(
     if rotation not in {90, 270} or max_crop_pixels <= 0:
         return 0
     width, height = image.size
-    if height <= max_crop_pixels + LIVE_ROTATION_EDGE_CROP_STEP_PIXELS:
+    if height <= LIVE_ROTATION_EDGE_CROP_STEP_PIXELS:
         return 0
 
     edge = "bottom" if rotation == 90 else "top"

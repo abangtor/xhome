@@ -520,13 +520,15 @@ class LiveTransportTests(unittest.TestCase):
         self.assertEqual(packet.packet_type, P2PPacketType.DIRECT_KCP_DATA)
         self.assertEqual(packet.channel, 2)
 
-    def test_minimal_kcp_receives_push_payload_and_sends_ack(self):
+    def test_minimal_kcp_receives_push_payload_and_flushes_ack(self):
         sent = []
         kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.ack_flush_interval = 0
         kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
         push = minimal_kcp_push(sequence=7, timestamp=1234, payload=b"frame")
 
         kcp.receive(push)
+        kcp.update()
 
         self.assertEqual(kcp.get_all_received(), [b"frame"])
         self.assertEqual(sent[0][:4], MEDIA_CONV_ID.to_bytes(4, "little"))
@@ -538,17 +540,39 @@ class LiveTransportTests(unittest.TestCase):
     def test_minimal_kcp_orders_payloads_and_drops_duplicates(self):
         sent = []
         kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.ack_flush_interval = 0
         kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
 
         kcp.receive(minimal_kcp_push(sequence=10, payload=b"first"))
+        kcp.update()
         kcp.receive(minimal_kcp_push(sequence=12, payload=b"third"))
+        kcp.update()
         kcp.receive(minimal_kcp_push(sequence=10, payload=b"duplicate"))
+        kcp.update()
         self.assertEqual(kcp.get_all_received(), [b"first"])
 
         kcp.receive(minimal_kcp_push(sequence=11, payload=b"second"))
+        kcp.update()
 
         self.assertEqual(kcp.get_all_received(), [b"second", b"third"])
         self.assertEqual([int.from_bytes(payload[16:20], "little") for payload in sent], [11, 11, 11, 13])
+
+    def test_minimal_kcp_batches_acks_until_update(self):
+        sent = []
+        kcp = MinimalKCP(MEDIA_CONV_ID)
+        kcp.include_outbound_handler(lambda _kcp, payload: sent.append(payload))
+
+        kcp.receive(minimal_kcp_push(sequence=1, timestamp=100, payload=b"one"))
+        kcp.receive(minimal_kcp_push(sequence=2, timestamp=200, payload=b"two"))
+        self.assertEqual(sent, [])
+
+        kcp.ack_flush_interval = 0
+        kcp.update()
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(len(sent[0]), 48)
+        self.assertEqual([sent[0][4], sent[0][28]], [MinimalKCP.ACK, MinimalKCP.ACK])
+        self.assertEqual([int.from_bytes(sent[0][12:16], "little"), int.from_bytes(sent[0][36:40], "little")], [1, 2])
 
     def test_unique_p2p_relays_dedupes_command_9_servers(self):
         relays = unique_p2p_relays(

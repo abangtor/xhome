@@ -45,6 +45,11 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn('"live_rotation_failures": self._live_rotation_failures', camera_source)
         self.assertIn('"live_invalid_jpeg_frames": self._live_invalid_jpeg_frames', camera_source)
         self.assertIn('"live_p2p_udp_packets": self._live_transport_stats.get("udp_packets")', camera_source)
+        self.assertIn(
+            '"live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams")',
+            camera_source,
+        )
+        self.assertIn('"live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments")', camera_source)
         self.assertIn("_attr_frame_interval = 0.2", camera_source)
         self.assertNotIn("CameraEntityFeature.STREAM", camera_source)
         self.assertIn("async def stream_source", camera_source)

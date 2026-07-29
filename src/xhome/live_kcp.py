@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -55,6 +56,8 @@ class XHomeKcpChannel:
         self.uid_suffix = uid_suffix
         self.kcp = (kcp_factory or default_kcp_factory)(config.conv_id, self)
         self.kcp.include_outbound_handler(self._send_kcp)
+        self.outbound_datagrams = 0
+        self.outbound_ack_segments = 0
 
     def send(self, payload: bytes) -> None:
         """Queue application payload bytes for KCP delivery."""
@@ -74,6 +77,8 @@ class XHomeKcpChannel:
         self.kcp.update(timestamp_ms)
 
     def _send_kcp(self, _kcp: Any, kcp_payload: bytes) -> None:
+        self.outbound_datagrams += 1
+        self.outbound_ack_segments += count_ack_segments(kcp_payload)
         self.send_udp(
             encode_kcp_udp_packet(
                 self.packet_type,
@@ -163,6 +168,14 @@ class XHomeKcpChannels:
         self.control.update(timestamp_ms)
         self.media.update(timestamp_ms)
 
+    def ack_stats(self) -> dict[str, int]:
+        """Return outbound ACK counters for diagnostics."""
+
+        return {
+            "datagrams": self.control.outbound_datagrams + self.media.outbound_datagrams,
+            "segments": self.control.outbound_ack_segments + self.media.outbound_ack_segments,
+        }
+
 
 def strip_uid_suffix(payload: bytes, uid: str) -> bytes:
     """Remove the native relay-mode UID suffix when present."""
@@ -179,6 +192,22 @@ def packet_conv_id(payload: bytes) -> int | None:
     if len(payload) < 4:
         return None
     return int.from_bytes(payload[:4], "little", signed=False)
+
+
+def count_ack_segments(payload: bytes) -> int:
+    """Count ACK segments in a combined KCP payload."""
+
+    count = 0
+    offset = 0
+    while offset + MinimalKCP.HEADER_BYTES <= len(payload):
+        payload_len = int.from_bytes(payload[offset + 20 : offset + 24], "little", signed=False)
+        body_end = offset + MinimalKCP.HEADER_BYTES + payload_len
+        if body_end > len(payload):
+            break
+        if payload[offset + 4] == MinimalKCP.ACK:
+            count += 1
+        offset = body_end
+    return count
 
 
 def default_kcp_factory(conv_id: int, _identity_token: Any) -> Any:
@@ -207,6 +236,10 @@ class MinimalKCP:
         self._next_sequence = 0
         self._expected_receive_sequence: int | None = None
         self._pending_receive: dict[int, bytes] = {}
+        self._pending_acks: list[bytes] = []
+        self._last_ack_flush = time.monotonic()
+        self.ack_batch_size = 16
+        self.ack_flush_interval = 0.01
 
     def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
         """Register a callback for outbound KCP segments."""
@@ -240,7 +273,7 @@ class MinimalKCP:
             if command == self.PUSH:
                 self._queue_received(sequence, data[body_start:body_end])
                 una = self._expected_receive_sequence if self._expected_receive_sequence is not None else sequence + 1
-                self._send(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence, una=una))
+                self._queue_ack(self._encode_segment(self.ACK, timestamp=timestamp, sequence=sequence, una=una))
             offset = body_end
 
     def get_all_received(self) -> list[bytes]:
@@ -251,7 +284,15 @@ class MinimalKCP:
         return received
 
     def update(self, timestamp_ms: int | None = None) -> None:
-        """Compatibility no-op for the external KCP API."""
+        """Flush pending ACKs."""
+
+        if not self._pending_acks:
+            return
+        if len(self._pending_acks) >= self.ack_batch_size:
+            self._flush_acks()
+            return
+        if time.monotonic() - self._last_ack_flush >= self.ack_flush_interval:
+            self._flush_acks()
 
     def _encode_segment(
         self,
@@ -288,3 +329,15 @@ class MinimalKCP:
     def _send(self, segment: bytes) -> None:
         if self._outbound_handler is not None:
             self._outbound_handler(self, segment)
+
+    def _queue_ack(self, segment: bytes) -> None:
+        self._pending_acks.append(segment)
+        if len(self._pending_acks) >= self.ack_batch_size:
+            self._flush_acks()
+
+    def _flush_acks(self) -> None:
+        if not self._pending_acks:
+            return
+        self._send(b"".join(self._pending_acks))
+        self._pending_acks.clear()
+        self._last_ack_flush = time.monotonic()

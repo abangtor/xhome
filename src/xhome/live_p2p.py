@@ -550,6 +550,7 @@ class XHomeP2PRendezvousProbe:
                             if on_ready is not None and not ready_notified:
                                 on_ready()
                                 ready_notified = True
+                    media_probe.update()
                     if on_stats is not None and now >= next_stats:
                         on_stats(probe_stats())
                         next_stats = now + 2.0
@@ -755,10 +756,15 @@ class KcpMediaProbe:
                         continue
                     self._handle_media_payload(payload)
                     self._emit_stats()
-                    channel.update()
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
             self._emit_stats()
+
+    def update(self) -> None:
+        """Flush pending KCP ACKs on active media paths."""
+
+        for channel in self.paths.values():
+            channel.update()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -767,6 +773,8 @@ class KcpMediaProbe:
                 {"host": host, "port": port, "packet_type": packet_type, "mode": mode}
                 for host, port, packet_type, mode in self.paths
             ],
+            "kcp_ack_datagrams": sum(channel.ack_stats()["datagrams"] for channel in self.paths.values()),
+            "kcp_ack_segments": sum(channel.ack_stats()["segments"] for channel in self.paths.values()),
             "udp_packets": self.udp_packets,
             "kcp_payloads": self.kcp_payloads,
             "app_packets": self.app_packets,

@@ -131,6 +131,8 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_rotation_failures": self._live_rotation_failures,
                 "live_invalid_jpeg_frames": self._live_invalid_jpeg_frames,
                 "live_p2p_udp_packets": self._live_transport_stats.get("udp_packets"),
+                "live_p2p_kcp_ack_datagrams": self._live_transport_stats.get("kcp_ack_datagrams"),
+                "live_p2p_kcp_ack_segments": self._live_transport_stats.get("kcp_ack_segments"),
                 "live_kcp_payloads": self._live_transport_stats.get("kcp_payloads"),
                 "live_app_packets": self._live_transport_stats.get("app_packets"),
                 "live_p2p_frames": self._live_transport_stats.get("frames"),
