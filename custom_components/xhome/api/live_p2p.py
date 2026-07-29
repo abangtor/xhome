@@ -345,7 +345,7 @@ class XHomeP2PRendezvousProbe:
         self,
         *,
         duration: float = 8.0,
-        interval: float = 0.05,
+        interval: float = 0.01,
         kcp_start_command: int | None = None,
         kcp_start_interval: float = 0.5,
         direct_touch_burst_size: int = 4,

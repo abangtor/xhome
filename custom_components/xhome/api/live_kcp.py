@@ -238,7 +238,7 @@ class MinimalKCP:
         self._pending_receive: dict[int, bytes] = {}
         self._pending_acks: list[bytes] = []
         self._last_ack_flush = time.monotonic()
-        self.ack_batch_size = 16
+        self.ack_batch_size = 6
         self.ack_flush_interval = 0.01
 
     def include_outbound_handler(self, handler: Callable[[Any, bytes], None]) -> None:
