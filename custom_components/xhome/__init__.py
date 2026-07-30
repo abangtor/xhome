@@ -438,7 +438,7 @@ def _register_service(
 async def _call_client_response(
     hass: HomeAssistant,
     call: ServiceCall,
-    name: str,
+    call_name: str,
     method_name: str,
     *args: Any,
     uid: str | None = None,
@@ -448,7 +448,7 @@ async def _call_client_response(
     """Run one coordinator client call and wrap the result for service responses."""
 
     coordinator = _coordinator_for_service(hass, call, uid=uid)
-    result = await coordinator.async_call_client(name, method_name, *args, refresh=refresh, **kwargs)
+    result = await coordinator.async_call_client(call_name, method_name, *args, refresh=refresh, **kwargs)
     return {"result": result}
 
 

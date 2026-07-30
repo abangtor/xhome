@@ -61,6 +61,13 @@ class HomeAssistantServiceTests(unittest.TestCase):
         self.assertIn("delete_temporary_password:", services_yaml)
         self.assertGreaterEqual(services_yaml.count("confirm:"), 2)
 
+    def test_service_helper_does_not_collide_with_api_name_kwarg(self):
+        init_source = INIT_PATH.read_text()
+
+        self.assertIn("call_name: str", init_source)
+        self.assertIn("name=call.data[CONF_NAME]", init_source)
+        self.assertNotIn("\n    name: str,\n    method_name", init_source)
+
     def test_external_live_stream_sidecar_service_is_not_registered(self):
         init_source = INIT_PATH.read_text()
         services_yaml = SERVICES_PATH.read_text()
