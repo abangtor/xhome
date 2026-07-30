@@ -51,6 +51,10 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
         self.assertIn("async_step_lock_user_mapping", source)
         self.assertIn("recent_unknown_lock_user_ids", source)
         self.assertIn("selector.EntitySelectorConfig(domain=\"person\")", source)
+        self.assertIn(
+            "person_field = vol.Optional(CONF_PERSON, default=person) if person else vol.Optional(CONF_PERSON)",
+            source,
+        )
         self.assertIn("async_show_menu", source)
         self.assertIn("\"menu_options\"", strings)
         self.assertIn("\"edit_lock_user\": \"Edit lock user\"", strings)

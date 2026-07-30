@@ -176,14 +176,15 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                     data=self._options_with({CONF_LOCK_USER_MAPPINGS: mappings}),
                 )
 
+        person = _clean_string(existing.get("person"))
+        person_field = vol.Optional(CONF_PERSON, default=person) if person else vol.Optional(CONF_PERSON)
+
         return self.async_show_form(
             step_id="lock_user_mapping",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME, default=_clean_string(existing.get("name"))): str,
-                    vol.Optional(CONF_PERSON, default=_clean_string(existing.get("person"))): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="person")
-                    ),
+                    person_field: selector.EntitySelector(selector.EntitySelectorConfig(domain="person")),
                     vol.Required(CONF_IDS, default=_id_list_string(existing.get("ids"))): selector.TextSelector(
                         selector.TextSelectorConfig(multiline=True)
                     ),
