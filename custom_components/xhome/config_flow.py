@@ -39,6 +39,7 @@ CONF_IDS = "ids"
 CONF_NAME = "name"
 CONF_PERSON = "person"
 CONF_REMOVE_NAME = "remove_name"
+CONF_SECTION = "section"
 
 
 class XHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -107,9 +108,31 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manage integration options."""
 
-        return self.async_show_menu(
+        if user_input is not None:
+            section = user_input[CONF_SECTION]
+            if section == "general":
+                return await self.async_step_general()
+            if section == "add_lock_user":
+                return await self.async_step_add_lock_user()
+            if section == "remove_lock_user":
+                return await self.async_step_remove_lock_user()
+
+        return self.async_show_form(
             step_id="init",
-            menu_options=["general", "add_lock_user", "remove_lock_user"],
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SECTION, default="general"): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"value": "general", "label": "General settings"},
+                                {"value": "add_lock_user", "label": "Add or update lock user"},
+                                {"value": "remove_lock_user", "label": "Remove lock user"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
         )
 
     async def async_step_general(self, user_input: dict[str, Any] | None = None) -> FlowResult:

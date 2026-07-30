@@ -47,6 +47,8 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
         self.assertIn("async_step_lock_user_mapping", source)
         self.assertIn("recent_unknown_lock_user_ids", source)
         self.assertIn("selector.EntitySelectorConfig(domain=\"person\")", source)
+        self.assertIn("CONF_SECTION", source)
+        self.assertIn("\"General settings\"", source)
 
 
 if __name__ == "__main__":

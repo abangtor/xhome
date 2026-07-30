@@ -26,16 +26,12 @@
     }
   },
   "options": {
-    "menu": {
-      "init": {
-        "general": "General settings",
-        "add_lock_user": "Add or update lock user",
-        "remove_lock_user": "Remove lock user"
-      }
-    },
     "step": {
       "init": {
-        "title": "XHome options"
+        "title": "XHome options",
+        "data": {
+          "section": "Section"
+        }
       },
       "general": {
         "title": "XHome general options",
