@@ -384,7 +384,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
     async def async_call_client(
         self,
-        name: str,
+        call_name: str,
         method_name: str,
         *args: Any,
         refresh: bool = False,
@@ -401,9 +401,9 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             )
         except XHomeAuthError as err:
             self.client.token = None
-            raise HomeAssistantError(f"XHome authentication failed while calling {name}") from err
+            raise HomeAssistantError(f"XHome authentication failed while calling {call_name}") from err
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
-            raise HomeAssistantError(f"XHome {name} failed: {err}") from err
+            raise HomeAssistantError(f"XHome {call_name} failed: {err}") from err
 
         if refresh:
             await self.async_request_refresh()

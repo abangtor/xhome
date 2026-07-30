@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT_PATH = ROOT / "custom_components" / "xhome" / "__init__.py"
+COORDINATOR_PATH = ROOT / "custom_components" / "xhome" / "coordinator.py"
 SERVICES_PATH = ROOT / "custom_components" / "xhome" / "services.yaml"
 
 
@@ -63,10 +64,13 @@ class HomeAssistantServiceTests(unittest.TestCase):
 
     def test_service_helper_does_not_collide_with_api_name_kwarg(self):
         init_source = INIT_PATH.read_text()
+        coordinator_source = COORDINATOR_PATH.read_text()
 
         self.assertIn("call_name: str", init_source)
+        self.assertIn("call_name: str", coordinator_source)
         self.assertIn("name=call.data[CONF_NAME]", init_source)
         self.assertNotIn("\n    name: str,\n    method_name", init_source)
+        self.assertNotIn("\n        name: str,\n        method_name", coordinator_source)
 
     def test_external_live_stream_sidecar_service_is_not_registered(self):
         init_source = INIT_PATH.read_text()
