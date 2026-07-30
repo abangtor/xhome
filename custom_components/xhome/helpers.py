@@ -93,11 +93,94 @@ LOCK_EVENT_KINDS = {
     30: "user_added",
     31: "user_deleted",
     32: "user_deleted",
-    33: "unlock",
+    33: "lock",
     34: "mode_change",
     35: "mode_change",
     36: "unlock",
     37: "doorbell",
+}
+LOCK_EVENT_TYPE_NAMES = {
+    0: "lock_pried",
+    1: "forcible_unlock",
+    2: "fingerprint_unlock_frozen",
+    3: "password_unlock_frozen",
+    4: "card_unlock_frozen",
+    5: "key_unlock_frozen",
+    6: "remote_unlock_frozen",
+    7: "low_battery",
+    8: "window_opened",
+    9: "universal_key_unlock",
+    10: "stay_timeout",
+    11: "smoke_detected",
+    12: "gas_leakage",
+    13: "sos",
+    14: "activity_alarm",
+    15: "key_left_on_lock",
+    16: "unlocked_alarm",
+    17: "knocked_door",
+    18: "loose_lockup",
+    19: "door_locked",
+    20: "locked",
+    21: "unlock",
+    22: "lock_fault",
+    23: "face_unlock_frozen",
+    24: "palm_unlock_frozen",
+    25: "demolition_alarm",
+    26: "hijacking_alarm",
+    27: "device_information_change_alarm",
+    28: "deployment_alarm",
+    29: "finger_vein_unlock_frozen",
+    30: "add_user",
+    31: "delete_user",
+    32: "clear_user",
+    33: "remote_lock",
+    34: "away_mode_on",
+    35: "away_mode_off",
+    36: "palm_vein_unlock_frozen",
+    37: "doorbell",
+}
+LOCK_EVENT_UNLOCK_CONTENT_NAMES = {
+    0: "fingerprint_unlock",
+    1: "password_unlock",
+    2: "card_unlock",
+    3: "remote_control_unlock",
+    4: "key_unlock",
+    5: "iris_unlock",
+    6: "palm_unlock",
+    7: "finger_vein_unlock",
+    8: "face_unlock",
+    9: "app_unlock",
+    10: "inside_unlock",
+    11: "combination_unlock",
+    12: "temporary_password_unlock",
+    13: "mechanical_unlock",
+    14: "palm_print_unlock",
+    15: "virtual_password_unlock",
+    17: "bluetooth_unlock",
+}
+LOCK_EVENT_LOCK_CONTENT_NAMES = {
+    10: "inside_button_lock",
+    19: "outside_button_lock",
+}
+LOCK_EVENT_USER_CONTENT_NAMES = {
+    0: "fingerprint",
+    1: "password",
+    2: "card",
+    3: "remote_control",
+    4: "key",
+    5: "iris",
+    6: "palm",
+    7: "finger_vein",
+    8: "face",
+    255: "all",
+}
+LOCK_EVENT_CONTENT_NAMES = {
+    19: LOCK_EVENT_LOCK_CONTENT_NAMES,
+    20: LOCK_EVENT_LOCK_CONTENT_NAMES,
+    21: LOCK_EVENT_UNLOCK_CONTENT_NAMES,
+    30: LOCK_EVENT_USER_CONTENT_NAMES,
+    31: LOCK_EVENT_USER_CONTENT_NAMES,
+    32: LOCK_EVENT_USER_CONTENT_NAMES,
 }
 ALARM_EVENT_KINDS = {"alarm", "emergency", "gas_alarm", "smoke_alarm", "sound_alarm", "tamper", "temperature_alarm"}
 EVENT_TEXT_KIND_MARKERS = (
@@ -321,9 +404,18 @@ def lock_event_details(event: dict[str, Any]) -> dict[str, Any]:
     event_type = string_value(event.get("type"))
     for key in LOCK_EVENT_ENCODED_FIELDS.get(event_type or "", ()):
         if details := _decode_base64_json(string_value(event.get(key))):
+            lock_event_type = string_value(details.get("event_type"))
+            lock_event_content = string_value(details.get("content"))
+            lock_event_type_code = _hex_int(lock_event_type)
+            lock_event_content_code = _hex_int(lock_event_content)
             return {
-                "lock_event_type": string_value(details.get("event_type")),
-                "lock_event_content": string_value(details.get("content")),
+                "lock_event_type": lock_event_type,
+                "lock_event_type_name": LOCK_EVENT_TYPE_NAMES.get(lock_event_type_code),
+                "lock_event_content": lock_event_content,
+                "lock_event_content_name": _lock_event_content_name(
+                    lock_event_type_code,
+                    lock_event_content_code,
+                ),
                 "lock_event_device": string_value(details.get("event_device")),
                 "lock_event_user_id": string_value(details.get("user_id")),
                 "lock_event_app_user": string_value(details.get("app_user")),
@@ -570,6 +662,14 @@ def _hex_int(value: Any) -> int | None:
         return int(text, 16)
     except ValueError:
         return None
+
+
+def _lock_event_content_name(event_type: int | None, content: int | None) -> str | None:
+    """Return the app-derived name for a lock-event content code."""
+
+    if event_type is None or content is None:
+        return None
+    return LOCK_EVENT_CONTENT_NAMES.get(event_type, {}).get(content)
 
 
 def _notify_event_bit(event_id: int) -> int:

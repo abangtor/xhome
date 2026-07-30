@@ -109,6 +109,77 @@ class HomeAssistantHelperTests(unittest.TestCase):
 
         self.assertEqual(helpers.event_kind(event), "unlock")
         self.assertEqual(helpers.lock_event_details(event)["lock_event_type"], "15")
+        self.assertEqual(helpers.lock_event_details(event)["lock_event_type_name"], "unlock")
+        self.assertEqual(helpers.lock_event_details(event)["lock_event_content"], "09")
+        self.assertEqual(helpers.lock_event_details(event)["lock_event_content_name"], "app_unlock")
+        self.assertEqual(helpers.event_bus_types(event), ("xhome_unlock",))
+
+        payload = helpers.event_payload({"uid": "abcdef123456", "name": "MainDoor"}, event)
+        self.assertEqual(payload["event_kind"], "unlock")
+        self.assertEqual(payload["lock_event_type_name"], "unlock")
+        self.assertEqual(payload["lock_event_content_name"], "app_unlock")
+
+    def test_encoded_remote_lock_is_lock_event(self):
+        encoded = base64.b64encode(
+            json.dumps(
+                {
+                    "user_id": "1",
+                    "event_type": "21",
+                    "event_device": "LOCK_PUSH",
+                    "content": "",
+                    "app_user": "Torsten",
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+
+        event = {"type": "6", "info": encoded}
+        details = helpers.lock_event_details(event)
+
+        self.assertEqual(helpers.event_kind(event), "lock")
+        self.assertEqual(helpers.event_bus_types(event), ("xhome_lock",))
+        self.assertEqual(details["lock_event_type"], "21")
+        self.assertEqual(details["lock_event_type_name"], "remote_lock")
+        self.assertIsNone(details["lock_event_content_name"])
+
+    def test_encoded_lock_content_uses_lock_specific_mapping(self):
+        for lock_event_type in ("13", "14"):
+            with self.subTest(lock_event_type=lock_event_type):
+                outside = base64.b64encode(
+                    json.dumps(
+                        {
+                            "user_id": "1",
+                            "event_type": lock_event_type,
+                            "event_device": "LOCK_PUSH",
+                            "content": "13",
+                            "app_user": "Torsten",
+                        }
+                    ).encode("utf-8")
+                ).decode("ascii")
+                inside = base64.b64encode(
+                    json.dumps(
+                        {
+                            "user_id": "1",
+                            "event_type": lock_event_type,
+                            "event_device": "LOCK_PUSH",
+                            "content": "0A",
+                            "app_user": "Torsten",
+                        }
+                    ).encode("utf-8")
+                ).decode("ascii")
+
+                outside_event = {"type": "6", "info": outside}
+                inside_event = {"type": "6", "info": inside}
+
+                self.assertEqual(helpers.event_kind(outside_event), "lock")
+                self.assertEqual(helpers.event_bus_types(outside_event), ("xhome_lock",))
+                self.assertEqual(
+                    helpers.lock_event_details(outside_event)["lock_event_content_name"],
+                    "outside_button_lock",
+                )
+                self.assertEqual(
+                    helpers.lock_event_details(inside_event)["lock_event_content_name"],
+                    "inside_button_lock",
+                )
 
     def test_event_bus_types_include_specific_and_alarm_events(self):
         self.assertEqual(helpers.event_bus_types({"type": "2"}), ("xhome_unlock",))

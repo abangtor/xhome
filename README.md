@@ -168,14 +168,101 @@ The CLI exposes the same split as `xhome auth-add --password ... --yes` and
 ## Events
 
 The integration polls XHome's recent-event REST endpoint and fires Home
-Assistant bus events for new records:
+Assistant bus events for new records. The optional local push listener feeds
+push payloads into the same event path. Every classified event carries the same
+payload as `xhome_event`.
 
-- `xhome_event` for every new XHome event record
-- `xhome_doorbell` for records that look like a doorbell/ring/call event
-- specific events such as `xhome_unlock`, `xhome_motion`,
-  `xhome_low_battery`, `xhome_lock`, `xhome_lock_event`, `xhome_alarm`,
-  `xhome_tamper`, `xhome_offline`, and `xhome_online` when the record can be
-  classified
+| Event | When it fires | Notes |
+| --- | --- | --- |
+| `xhome_event` | Every new XHome event record. | Always fired first. |
+| `xhome_doorbell` | Doorbell, ring, call, or indoor-call records. | Also fired for text records that look like a doorbell event. |
+| `xhome_motion` | PIR/activity/motion records. | Includes lock activity events decoded from app lock payloads. |
+| `xhome_unlock` | Unlock records. | Includes fingerprint, password, card, app, inside, temporary password, mechanical, Bluetooth, and other decoded unlock methods when known. |
+| `xhome_lock` | Locking action records. | Includes locked, door locked, and remote lock. This is an actual locking action. |
+| `xhome_lock_event` | Generic lock-device records. | Fallback when a lock-device record is visible but cannot be mapped to a more specific lock, unlock, alarm, doorbell, or user-management event. |
+| `xhome_low_battery` | Low-battery records. | Covers ordinary low-power push types and decoded lock low-battery events. |
+| `xhome_temperature_alarm` | Low/high temperature alarms. | Classified from app push types `8` and `9`. Also triggers `xhome_alarm`. |
+| `xhome_sound_alarm` | Sound/noise alarm records. | Also triggers `xhome_alarm`. |
+| `xhome_emergency` | Emergency/SOS records. | Also triggers `xhome_alarm`. |
+| `xhome_smoke_alarm` | Decoded smoke alarm lock records. | Also triggers `xhome_alarm`. |
+| `xhome_gas_alarm` | Decoded gas leakage lock records. | Also triggers `xhome_alarm`. |
+| `xhome_tamper` | Tamper/demolition records. | Also triggers `xhome_alarm`. |
+| `xhome_alarm` | Any alarm-like record. | Fired in addition to the more specific alarm event when available. |
+| `xhome_offline` | Device offline records. | Classified from app push type `20`. |
+| `xhome_online` | Device online records. | Classified from app push type `21`. |
+| `xhome_transfer` | Transfer records. | Classified from app push type `100`. |
+| `xhome_device_added` | Device-added records. | Classified from app push type `200`. |
+| `xhome_refused` | Refused records. | Classified from app push type `201`. |
+| `xhome_server_update` | Server-update records. | Classified from app push type `300`. |
+| `xhome_user_added` | Decoded lock user-added records. | Uses decoded lock-event type `0x1E`. |
+| `xhome_user_deleted` | Decoded lock user-deleted or user-cleared records. | Uses decoded lock-event types `0x1F` and `0x20`. |
+| `xhome_mode_change` | Decoded lock mode-change records. | Includes away mode on/off. |
+
+Event payload attributes:
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `device_name` | string | Human-readable XHome device name. |
+| `device_id` | integer or `null` | XHome cloud device id when present. |
+| `uid_tail` | string or `null` | Redacted device UID tail for diagnostics. |
+| `event_key` | string | Stable integration dedupe key for the event. |
+| `event_guid` | string or `null` | Raw XHome event GUID when present. |
+| `event_id` | string or `null` | Raw XHome event id when present. |
+| `event_type` | string or `null` | Raw XHome top-level event type, such as `1`, `6`, `20`, or `300`. |
+| `event_type_name` | string or `null` | Decoded top-level event type name when known, such as `call`, `lock`, or `online`. |
+| `event_kind` | string | Normalized integration kind, such as `doorbell`, `unlock`, `lock`, `alarm`, or `offline`. |
+| `action` | string or `null` | Raw action text when supplied by XHome. |
+| `time` | string or `null` | Raw event time text when supplied by XHome. |
+| `time_stamp` | integer or `null` | Raw event timestamp when supplied by XHome. |
+| `info` | string or `null` | Raw info field. Lock events may contain the app's base64 JSON payload here. |
+| `name` | string or `null` | Raw event/device name field when supplied by XHome. |
+| `remarks` | string or `null` | Raw remarks text when supplied by XHome. |
+| `has_image` | boolean | Whether the record has an image URL or image reference. |
+| `has_media` | boolean | Whether the record may have resolvable cloud media. |
+| `video_status` | integer or `null` | Raw video status when supplied by XHome. |
+| `video_size` | integer or `null` | Raw video size when supplied by XHome. |
+| `source` | string | Event source, currently `poll` or `local_push`. |
+| `lock_event_type` | string or `null` | Raw app lock-event type hex string from encoded lock payloads. |
+| `lock_event_type_name` | string or `null` | Decoded app lock-event type, such as `unlock`, `locked`, `remote_lock`, or `add_user`. |
+| `lock_event_content` | string or `null` | Raw app lock-event content hex string from encoded lock payloads. |
+| `lock_event_content_name` | string or `null` | Decoded content value when known. Meaning depends on `lock_event_type_name`. |
+| `lock_event_device` | string or `null` | Raw app lock-event device marker, such as `LOCK_PUSH`. |
+| `lock_event_user_id` | string or `null` | Raw lock user id from the encoded app payload. |
+| `lock_event_app_user` | string or `null` | App user from the encoded lock payload when present. |
+
+Decoded `lock_event_content_name` values:
+
+| Context | Raw `lock_event_type` | Raw `lock_event_content` | `lock_event_content_name` |
+| --- | --- | --- | --- |
+| Unlock method | `15` (`0x15`) | `00` | `fingerprint_unlock` |
+| Unlock method | `15` (`0x15`) | `01` | `password_unlock` |
+| Unlock method | `15` (`0x15`) | `02` | `card_unlock` |
+| Unlock method | `15` (`0x15`) | `03` | `remote_control_unlock` |
+| Unlock method | `15` (`0x15`) | `04` | `key_unlock` |
+| Unlock method | `15` (`0x15`) | `05` | `iris_unlock` |
+| Unlock method | `15` (`0x15`) | `06` | `palm_unlock` |
+| Unlock method | `15` (`0x15`) | `07` | `finger_vein_unlock` |
+| Unlock method | `15` (`0x15`) | `08` | `face_unlock` |
+| Unlock method | `15` (`0x15`) | `09` | `app_unlock` |
+| Unlock method | `15` (`0x15`) | `0A` | `inside_unlock` |
+| Unlock method | `15` (`0x15`) | `0B` | `combination_unlock` |
+| Unlock method | `15` (`0x15`) | `0C` | `temporary_password_unlock` |
+| Unlock method | `15` (`0x15`) | `0D` | `mechanical_unlock` |
+| Unlock method | `15` (`0x15`) | `0E` | `palm_print_unlock` |
+| Unlock method | `15` (`0x15`) | `0F` | `virtual_password_unlock` |
+| Unlock method | `15` (`0x15`) | `11` | `bluetooth_unlock` |
+| Lock method | `13`/`14` (`0x13`/`0x14`) | `0A` | `inside_button_lock` |
+| Lock method | `13`/`14` (`0x13`/`0x14`) | `13` | `outside_button_lock` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `00` | `fingerprint` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `01` | `password` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `02` | `card` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `03` | `remote_control` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `04` | `key` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `05` | `iris` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `06` | `palm` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `07` | `finger_vein` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `08` | `face` |
+| User add/delete/clear | `1E`/`1F`/`20` (`0x1E`/`0x1F`/`0x20`) | `FF` | `all` |
 
 Example automation trigger:
 
