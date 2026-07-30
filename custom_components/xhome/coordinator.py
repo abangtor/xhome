@@ -27,6 +27,7 @@ from .api.push import XHomePushClient, XHomePushMessage, build_push_register_inf
 from .const import (
     CONF_EVENT_SCAN_INTERVAL,
     CONF_LOCAL_PUSH_ENABLED,
+    CONF_LOCK_USER_MAPPINGS,
     CONF_REGION,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
@@ -180,6 +181,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._latest_events: dict[str, XHomeLatestEvent] = {}
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         self._latest_event_video_media: dict[str, XHomeLatestEventMedia] = {}
+        self._recent_unknown_lock_user_ids: dict[str, list[str]] = {}
         self._local_push_client: XHomePushClient | None = None
         self._local_push_registered_token: str | None = None
         self._local_push_status: dict[str, Any] = {
@@ -250,6 +252,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Return local push worker status and counters."""
 
         return dict(self._local_push_status)
+
+    def recent_unknown_lock_user_ids(self, uid: str) -> list[str]:
+        """Return recently observed unmapped lock user ids for a device."""
+
+        return list(self._recent_unknown_lock_user_ids.get(uid, ()))
 
     async def async_seed_events(self) -> None:
         """Seed the event dedupe cache without firing historical events."""
@@ -819,10 +826,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         key = event_key(uid, record)
         payload = {
-            **event_payload(device, record),
+            **event_payload(device, record, self.config_entry.options),
             "event_key": key,
             "source": source,
         }
+        self._remember_unknown_lock_user_id(uid, payload)
         return {
             "uid": uid,
             "event_key": key,
@@ -834,6 +842,25 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             "payload": payload,
             "bus_event_types": _event_bus_types(record),
         }
+
+    def _remember_unknown_lock_user_id(self, uid: str, payload: dict[str, Any]) -> None:
+        """Remember unmapped lock user ids so the options flow can suggest them."""
+
+        lock_user_id = string_value(payload.get("lock_event_user_id"))
+        if not uid or not lock_user_id or payload.get("lock_user_name"):
+            return
+        mappings = self.config_entry.options.get(CONF_LOCK_USER_MAPPINGS)
+        if isinstance(mappings, dict):
+            for mapping in mappings.get(uid, ()):
+                if not isinstance(mapping, dict):
+                    continue
+                if lock_user_id in {string_value(item) for item in mapping.get("ids", ())}:
+                    return
+        ids = self._recent_unknown_lock_user_ids.setdefault(uid, [])
+        if lock_user_id in ids:
+            ids.remove(lock_user_id)
+        ids.insert(0, lock_user_id)
+        del ids[20:]
 
     def _fire_event_bus_events(self, event: dict[str, Any]) -> None:
         """Fire the generic and classified Home Assistant event bus events."""

@@ -26,9 +26,19 @@
     }
   },
   "options": {
+    "menu": {
+      "init": {
+        "general": "General settings",
+        "add_lock_user": "Add or update lock user",
+        "remove_lock_user": "Remove lock user"
+      }
+    },
     "step": {
       "init": {
-        "title": "XHome options",
+        "title": "XHome options"
+      },
+      "general": {
+        "title": "XHome general options",
         "data": {
           "region": "Region",
           "scan_interval": "Device scan interval",
@@ -37,7 +47,38 @@
           "local_push_enabled": "Local event push",
           "timeout": "Request timeout"
         }
+      },
+      "add_lock_user": {
+        "title": "Choose lock",
+        "data": {
+          "device_uid": "Lock"
+        }
+      },
+      "lock_user_mapping": {
+        "title": "Add or update lock user",
+        "description": "Lock: {device}\n\nCurrent mappings:\n{current_mappings}\n\nRecently seen unmapped ids:\n{recent_unknown_ids}",
+        "data": {
+          "name": "Name",
+          "person": "Home Assistant person",
+          "ids": "Lock user ids"
+        }
+      },
+      "remove_lock_user": {
+        "title": "Choose lock",
+        "data": {
+          "device_uid": "Lock"
+        }
+      },
+      "remove_lock_user_mapping": {
+        "title": "Remove lock user",
+        "description": "Lock: {device}\n\nCurrent mappings:\n{current_mappings}",
+        "data": {
+          "remove_name": "Mapping"
+        }
       }
+    },
+    "error": {
+      "required": "Required"
     }
   },
   "entity": {

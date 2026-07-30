@@ -119,6 +119,59 @@ class HomeAssistantHelperTests(unittest.TestCase):
         self.assertEqual(payload["lock_event_type_name"], "unlock")
         self.assertEqual(payload["lock_event_content_name"], "app_unlock")
 
+    def test_event_payload_adds_configured_lock_user_mapping(self):
+        encoded = base64.b64encode(
+            json.dumps(
+                {
+                    "user_id": "32",
+                    "event_type": "15",
+                    "event_device": "LOCK_PUSH",
+                    "content": "00",
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+        options = {
+            "lock_user_mappings": {
+                "abcdef123456": [
+                    {"name": "torsten", "person": "person.torsten", "ids": ["13", "14", "32"]},
+                    {"name": "joanne", "person": "person.joanne", "ids": ["24", "25", "66"]},
+                ],
+            }
+        }
+
+        payload = helpers.event_payload(
+            {"uid": "abcdef123456", "name": "MainDoor"},
+            {"type": "6", "info": encoded},
+            options,
+        )
+
+        self.assertEqual(payload["lock_event_user_id"], "32")
+        self.assertEqual(payload["lock_user_name"], "torsten")
+        self.assertEqual(payload["lock_person"], "person.torsten")
+
+    def test_event_payload_leaves_unmapped_lock_user_without_name(self):
+        encoded = base64.b64encode(
+            json.dumps(
+                {
+                    "user_id": "99",
+                    "event_type": "15",
+                    "event_device": "LOCK_PUSH",
+                    "content": "00",
+                }
+            ).encode("utf-8")
+        ).decode("ascii")
+        options = {"lock_user_mappings": {"abcdef123456": [{"name": "torsten", "ids": ["32"]}]}}
+
+        payload = helpers.event_payload(
+            {"uid": "abcdef123456", "name": "MainDoor"},
+            {"type": "6", "info": encoded},
+            options,
+        )
+
+        self.assertEqual(payload["lock_event_user_id"], "99")
+        self.assertNotIn("lock_user_name", payload)
+        self.assertNotIn("lock_person", payload)
+
     def test_encoded_remote_lock_is_lock_event(self):
         encoded = base64.b64encode(
             json.dumps(
@@ -184,7 +237,10 @@ class HomeAssistantHelperTests(unittest.TestCase):
     def test_event_bus_types_include_specific_and_alarm_events(self):
         self.assertEqual(helpers.event_bus_types({"type": "2"}), ("xhome_unlock",))
         self.assertEqual(helpers.event_bus_types({"type": "1"}), ("xhome_doorbell",))
-        self.assertEqual(helpers.event_bus_types({"type": "25", "info": "tamper alarm"}), ("xhome_tamper", "xhome_alarm"))
+        self.assertEqual(
+            helpers.event_bus_types({"type": "25", "info": "tamper alarm"}),
+            ("xhome_tamper", "xhome_alarm"),
+        )
 
     def test_event_payload_redacts_uid_and_omits_media_url(self):
         payload = helpers.event_payload(

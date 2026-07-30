@@ -433,11 +433,16 @@ def lock_event_kind(event: dict[str, Any]) -> str | None:
     return LOCK_EVENT_KINDS.get(lock_event_type, "lock_event")
 
 
-def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+def event_payload(
+    device: dict[str, Any],
+    event: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build a redacted Home Assistant event payload."""
 
     uid = device_uid(device) or string_value(event.get("uid")) or ""
     lock_details = lock_event_details(event)
+    lock_user = lock_user_mapping(uid, lock_details.get("lock_event_user_id"), options)
     payload = {
         "device_name": device_name(device),
         "device_id": int_value(first_present(device, "id", "device_id", "deviceId")),
@@ -459,7 +464,40 @@ def event_payload(device: dict[str, Any], event: dict[str, Any]) -> dict[str, An
         "video_size": int_value(event.get("video_size")),
     }
     payload.update(lock_details)
+    payload.update(lock_user)
     return payload
+
+
+def lock_user_mapping(
+    uid: str | None,
+    lock_event_user_id: Any,
+    options: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Return configured friendly lock-user attributes for a lock user id."""
+
+    uid = string_value(uid)
+    lock_user_id = string_value(lock_event_user_id)
+    if not uid or not lock_user_id or not options:
+        return {}
+
+    mappings = options.get("lock_user_mappings")
+    if not isinstance(mappings, dict):
+        return {}
+
+    for mapping in _lock_user_mappings_for_device(mappings, uid):
+        ids = mapping.get("ids")
+        if not isinstance(ids, list):
+            continue
+        normalized_ids = {string_value(item) for item in ids}
+        if lock_user_id not in normalized_ids:
+            continue
+        result: dict[str, str] = {}
+        if name := string_value(mapping.get("name")):
+            result["lock_user_name"] = name
+        if person := string_value(mapping.get("person")):
+            result["lock_person"] = person
+        return result
+    return {}
 
 
 def event_has_image(event: dict[str, Any]) -> bool:
@@ -670,6 +708,15 @@ def _lock_event_content_name(event_type: int | None, content: int | None) -> str
     if event_type is None or content is None:
         return None
     return LOCK_EVENT_CONTENT_NAMES.get(event_type, {}).get(content)
+
+
+def _lock_user_mappings_for_device(mappings: dict[str, Any], uid: str) -> list[dict[str, Any]]:
+    """Return configured lock-user mappings for a device UID."""
+
+    device_mappings = mappings.get(uid)
+    if not isinstance(device_mappings, list):
+        return []
+    return [mapping for mapping in device_mappings if isinstance(mapping, dict)]
 
 
 def _notify_event_bit(event_id: int) -> int:

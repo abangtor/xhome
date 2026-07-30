@@ -229,6 +229,22 @@ Event payload attributes:
 | `lock_event_device` | string or `null` | Raw app lock-event device marker, such as `LOCK_PUSH`. |
 | `lock_event_user_id` | string or `null` | Raw lock user id from the encoded app payload. |
 | `lock_event_app_user` | string or `null` | App user from the encoded lock payload when present. |
+| `lock_user_name` | string, omitted when unmapped | Friendly lock user name configured in the integration options. |
+| `lock_person` | string, omitted when unmapped | Optional Home Assistant `person` entity configured for the mapped lock user. |
+
+Lock user mapping:
+
+Use **Settings > Devices & services > XHome > Configure** to add or remove lock
+user mappings. The options flow keeps the existing general settings in a
+separate **General settings** menu item and adds lock-user mapping screens. Pick
+the lock, enter a friendly name, optionally choose a Home Assistant person, and
+enter one or more lock user ids separated by commas, spaces, or new lines.
+
+The integration remembers recently observed unmapped `lock_event_user_id` values
+while it is running and shows them on the add/update screen for the selected
+lock. Add those ids to a mapping when you know who or what they represent. If an
+event's id is not mapped, the event keeps the raw `lock_event_user_id` and omits
+`lock_user_name` and `lock_person`.
 
 Decoded `lock_event_content_name` values:
 

@@ -23,7 +23,7 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
     def test_region_option_is_available(self):
         source = CONFIG_FLOW_PATH.read_text()
 
-        self.assertIn("self._config_entry.options.get(\n                            CONF_REGION", source)
+        self.assertIn("config_entry.options.get(\n                    CONF_REGION", source)
         self.assertIn("selector.SelectSelectorConfig(options=REGIONS)", source)
 
     def test_image_rotation_option_is_available(self):
@@ -38,6 +38,15 @@ class ConfigFlowCompatibilityTests(unittest.TestCase):
 
         self.assertNotIn("CONF_LIVE_STREAM_URL_TEMPLATE", source)
         self.assertNotIn("DEFAULT_LIVE_STREAM_URL_TEMPLATE", source)
+
+    def test_options_flow_has_lock_user_mapping_steps(self):
+        source = CONFIG_FLOW_PATH.read_text()
+
+        self.assertIn("CONF_LOCK_USER_MAPPINGS", source)
+        self.assertIn("async_step_add_lock_user", source)
+        self.assertIn("async_step_lock_user_mapping", source)
+        self.assertIn("recent_unknown_lock_user_ids", source)
+        self.assertIn("selector.EntitySelectorConfig(domain=\"person\")", source)
 
 
 if __name__ == "__main__":
