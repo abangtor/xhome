@@ -115,6 +115,9 @@
       "last_event": {
         "name": "Last event"
       },
+      "last_unlock_by": {
+        "name": "Last unlock by"
+      },
       "latest_event_video": {
         "name": "Latest event video"
       }

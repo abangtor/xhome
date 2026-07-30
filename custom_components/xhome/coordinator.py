@@ -179,6 +179,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._seen_event_order: deque[str] = deque()
         self._event_poll_seeded = False
         self._latest_events: dict[str, XHomeLatestEvent] = {}
+        self._latest_unlock_events: dict[str, XHomeLatestEvent] = {}
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         self._latest_event_video_media: dict[str, XHomeLatestEventMedia] = {}
         self._recent_unknown_lock_user_ids: dict[str, list[str]] = {}
@@ -272,6 +273,11 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Return cached latest event for a device."""
 
         return self._latest_events.get(uid)
+
+    def latest_unlock_event(self, uid: str) -> XHomeLatestEvent | None:
+        """Return cached latest unlock event for a device."""
+
+        return self._latest_unlock_events.get(uid)
 
     def latest_event_video_media(self, uid: str) -> XHomeLatestEventMedia | None:
         """Return cached latest event video media for a device."""
@@ -438,12 +444,15 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             return
 
         event_candidates: dict[str, dict[str, Any]] = {}
+        unlock_candidates: dict[str, dict[str, Any]] = {}
         media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
             is_new = self._remember_event_key(key)
             if is_new:
                 _keep_newest_event_candidate(event_candidates, event)
+                if event["payload"].get("event_kind") == "unlock":
+                    _keep_newest_event_candidate(unlock_candidates, event)
             if is_new and event["has_media"]:
                 media_candidates.append(event)
             if not is_new or seed_only:
@@ -452,6 +461,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             self._fire_event_bus_events(event)
 
         updated = self._update_latest_events(event_candidates.values())
+        updated = self._update_latest_unlock_events(unlock_candidates.values()) or updated
         if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
@@ -477,6 +487,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         self._fire_event_bus_events(event)
         updated = self._update_latest_events([event])
+        updated = self._update_latest_unlock_events([event]) or updated
         if event["has_media"] and await self._async_update_latest_event_media([event]):
             updated = True
         if updated:
@@ -497,13 +508,17 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             raise HomeAssistantError(f"XHome event media refresh failed: {err}") from err
 
         event_candidates: dict[str, dict[str, Any]] = {}
+        unlock_candidates: dict[str, dict[str, Any]] = {}
         media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             _keep_newest_event_candidate(event_candidates, event)
+            if event["payload"].get("event_kind") == "unlock":
+                _keep_newest_event_candidate(unlock_candidates, event)
             if event["has_media"]:
                 media_candidates.append(event)
 
         updated = self._update_latest_events(event_candidates.values())
+        updated = self._update_latest_unlock_events(unlock_candidates.values()) or updated
         if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
@@ -885,6 +900,26 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             if current is not None and current.sort_key > latest.sort_key:
                 continue
             self._latest_events[latest.uid] = latest
+            updated = True
+        return updated
+
+    def _update_latest_unlock_events(self, events: Iterable[dict[str, Any]]) -> bool:
+        """Cache the latest unlock event per device."""
+
+        updated = False
+        for event in events:
+            if event["payload"].get("event_kind") != "unlock":
+                continue
+            latest = XHomeLatestEvent(
+                uid=event["uid"],
+                event_key=event["event_key"],
+                sort_key=event["sort_key"],
+                payload=event["payload"],
+            )
+            current = self._latest_unlock_events.get(latest.uid)
+            if current is not None and current.sort_key > latest.sort_key:
+                continue
+            self._latest_unlock_events[latest.uid] = latest
             updated = True
         return updated
 

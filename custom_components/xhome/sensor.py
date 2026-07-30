@@ -78,6 +78,7 @@ async def async_setup_entry(
                 for description in SENSORS
             ),
             *(XHomeLastEventSensor(coordinator, uid) for uid in coordinator.data.devices),
+            *(XHomeLastUnlockBySensor(coordinator, uid) for uid in coordinator.data.devices),
             *(XHomeLatestEventVideoSensor(coordinator, uid) for uid in coordinator.data.devices),
         ]
     )
@@ -138,6 +139,74 @@ class XHomeLastEventSensor(XHomeEntity, SensorEntity):
             return attrs
 
         attrs.update(latest.payload)
+        return {key: value for key, value in attrs.items() if value is not None}
+
+
+class XHomeLastUnlockBySensor(XHomeEntity, SensorEntity):
+    """Latest XHome unlock actor sensor."""
+
+    _attr_icon = "mdi:account-key"
+    _attr_translation_key = "last_unlock_by"
+
+    def __init__(self, coordinator: XHomeDataUpdateCoordinator, uid: str) -> None:
+        """Initialize the latest unlock actor sensor."""
+
+        super().__init__(coordinator, uid, "last_unlock_by")
+
+    @property
+    def native_value(self) -> str | None:
+        """Return who most likely unlocked the door."""
+
+        latest = self.coordinator.latest_unlock_event(self.uid)
+        if latest is None:
+            return None
+        payload = latest.payload
+        return (
+            payload.get("lock_user_name")
+            or payload.get("lock_person")
+            or payload.get("lock_event_app_user")
+            or payload.get("lock_event_user_id")
+            or payload.get("lock_event_content_name")
+            or payload.get("event_type_name")
+            or "unknown"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return latest unlock metadata."""
+
+        attrs = super().extra_state_attributes
+        latest = self.coordinator.latest_unlock_event(self.uid)
+        if latest is None:
+            return attrs
+
+        payload = latest.payload
+        attrs.update(
+            {
+                "unlock_user_name": payload.get("lock_user_name"),
+                "unlock_person": payload.get("lock_person"),
+                "unlock_user_id": payload.get("lock_event_user_id"),
+                "unlock_app_user": payload.get("lock_event_app_user"),
+                "unlock_method": payload.get("lock_event_content_name") or payload.get("event_type_name"),
+                "lock_event_type": payload.get("lock_event_type"),
+                "lock_event_type_name": payload.get("lock_event_type_name"),
+                "lock_event_content": payload.get("lock_event_content"),
+                "lock_event_content_name": payload.get("lock_event_content_name"),
+                "lock_event_device": payload.get("lock_event_device"),
+                "event_key": payload.get("event_key"),
+                "event_guid": payload.get("event_guid"),
+                "event_id": payload.get("event_id"),
+                "event_type": payload.get("event_type"),
+                "event_type_name": payload.get("event_type_name"),
+                "event_time": payload.get("time"),
+                "event_time_stamp": payload.get("time_stamp"),
+                "source": payload.get("source"),
+                "has_image": payload.get("has_image"),
+                "has_media": payload.get("has_media"),
+                "video_status": payload.get("video_status"),
+                "video_size": payload.get("video_size"),
+            }
+        )
         return {key: value for key, value in attrs.items() if value is not None}
 
 
