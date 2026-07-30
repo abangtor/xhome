@@ -234,15 +234,17 @@ Event payload attributes:
 
 Lock user mapping:
 
-Use **Settings > Devices & services > XHome > Configure** to add or remove lock
-user mappings. The options flow keeps the existing general settings in a
-separate **General settings** menu item and adds lock-user mapping screens. Pick
-the lock, enter a friendly name, optionally choose a Home Assistant person, and
-enter one or more lock user ids separated by commas, spaces, or new lines.
+Use **Settings > Devices & services > XHome > Configure** to add, edit, or
+remove lock user mappings. The options flow keeps the existing general settings
+in a separate **General settings** menu item and adds lock-user mapping screens.
+Pick the lock, enter a friendly name, optionally choose a Home Assistant person,
+and enter one or more lock user ids separated by commas, spaces, or new lines.
+The edit path first asks which existing mapping to change, then opens the form
+prefilled with the saved name, person, and ids.
 
 The integration remembers recently observed unmapped `lock_event_user_id` values
-while it is running and shows them on the add/update screen for the selected
-lock. Add those ids to a mapping when you know who or what they represent. If an
+while it is running and shows them on the mapping screen for the selected lock.
+Add those ids to a mapping when you know who or what they represent. If an
 event's id is not mapped, the event keeps the raw `lock_event_user_id` and omits
 `lock_user_name` and `lock_person`.
 

@@ -29,8 +29,11 @@
     "step": {
       "init": {
         "title": "XHome options",
-        "data": {
-          "section": "Section"
+        "menu_options": {
+          "general": "General settings",
+          "add_lock_user": "Add lock user",
+          "edit_lock_user": "Edit lock user",
+          "remove_lock_user": "Remove lock user"
         }
       },
       "general": {
@@ -51,12 +54,25 @@
         }
       },
       "lock_user_mapping": {
-        "title": "Add or update lock user",
+        "title": "Lock user",
         "description": "Lock: {device}\n\nCurrent mappings:\n{current_mappings}\n\nRecently seen unmapped ids:\n{recent_unknown_ids}",
         "data": {
           "name": "Name",
           "person": "Home Assistant person",
           "ids": "Lock user ids"
+        }
+      },
+      "edit_lock_user": {
+        "title": "Choose lock",
+        "data": {
+          "device_uid": "Lock"
+        }
+      },
+      "choose_lock_user_mapping": {
+        "title": "Choose lock user",
+        "description": "Lock: {device}\n\nCurrent mappings:\n{current_mappings}",
+        "data": {
+          "lock_user_name": "Lock user"
         }
       },
       "remove_lock_user": {

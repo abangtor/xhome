@@ -36,10 +36,10 @@ from .const import (
 
 CONF_DEVICE_UID = "device_uid"
 CONF_IDS = "ids"
+CONF_LOCK_USER_NAME = "lock_user_name"
 CONF_NAME = "name"
 CONF_PERSON = "person"
 CONF_REMOVE_NAME = "remove_name"
-CONF_SECTION = "section"
 
 
 class XHomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -104,35 +104,14 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
 
         self._config_entry = config_entry
         self._selected_lock_uid: str | None = None
+        self._editing_lock_user_name: str | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manage integration options."""
 
-        if user_input is not None:
-            section = user_input[CONF_SECTION]
-            if section == "general":
-                return await self.async_step_general()
-            if section == "add_lock_user":
-                return await self.async_step_add_lock_user()
-            if section == "remove_lock_user":
-                return await self.async_step_remove_lock_user()
-
-        return self.async_show_form(
+        return self.async_show_menu(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SECTION, default="general"): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                {"value": "general", "label": "General settings"},
-                                {"value": "add_lock_user", "label": "Add or update lock user"},
-                                {"value": "remove_lock_user", "label": "Remove lock user"},
-                            ],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
+            menu_options=["general", "add_lock_user", "edit_lock_user", "remove_lock_user"],
         )
 
     async def async_step_general(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -151,6 +130,7 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             self._selected_lock_uid = user_input[CONF_DEVICE_UID]
+            self._editing_lock_user_name = None
             return await self.async_step_lock_user_mapping()
 
         return self.async_show_form(
@@ -165,12 +145,13 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_lock_user_mapping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Add or replace one lock user mapping."""
+        """Add or edit one lock user mapping."""
 
         if self._selected_lock_uid is None:
             return await self.async_step_add_lock_user()
 
         errors: dict[str, str] = {}
+        existing = self._mapping_for_name(self._selected_lock_uid, self._editing_lock_user_name)
         if user_input is not None:
             ids = _parse_id_list(user_input.get(CONF_IDS))
             name = _clean_string(user_input.get(CONF_NAME))
@@ -183,7 +164,7 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                 device_mappings = [
                     mapping
                     for mapping in mappings.get(self._selected_lock_uid, [])
-                    if _clean_string(mapping.get("name")) != name
+                    if _clean_string(mapping.get("name")) not in {self._editing_lock_user_name, name}
                 ]
                 mapping: dict[str, Any] = {"name": name, "ids": ids}
                 if person := _clean_string(user_input.get(CONF_PERSON)):
@@ -199,11 +180,11 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
             step_id="lock_user_mapping",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_NAME, default=""): str,
-                    vol.Optional(CONF_PERSON, default=""): selector.EntitySelector(
+                    vol.Required(CONF_NAME, default=_clean_string(existing.get("name"))): str,
+                    vol.Optional(CONF_PERSON, default=_clean_string(existing.get("person"))): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="person")
                     ),
-                    vol.Required(CONF_IDS, default=""): selector.TextSelector(
+                    vol.Required(CONF_IDS, default=_id_list_string(existing.get("ids"))): selector.TextSelector(
                         selector.TextSelectorConfig(multiline=True)
                     ),
                 }
@@ -213,6 +194,53 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
                 "device": self._device_label(self._selected_lock_uid),
                 "current_mappings": self._mapping_summary(self._selected_lock_uid),
                 "recent_unknown_ids": self._recent_unknown_id_summary(self._selected_lock_uid),
+            },
+        )
+
+    async def async_step_edit_lock_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Choose the lock device for editing a user mapping."""
+
+        if user_input is not None:
+            self._selected_lock_uid = user_input[CONF_DEVICE_UID]
+            return await self.async_step_choose_lock_user_mapping()
+
+        return self.async_show_form(
+            step_id="edit_lock_user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE_UID): selector.SelectSelector(
+                        selector.SelectSelectorConfig(options=self._mapped_device_options())
+                    )
+                }
+            ),
+        )
+
+    async def async_step_choose_lock_user_mapping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Choose one configured lock user mapping to edit."""
+
+        if self._selected_lock_uid is None:
+            return await self.async_step_edit_lock_user()
+
+        mapping_names = self._mapping_names(self._selected_lock_uid)
+        if not mapping_names:
+            return self.async_create_entry(title="", data=dict(self._config_entry.options))
+
+        if user_input is not None:
+            self._editing_lock_user_name = user_input[CONF_LOCK_USER_NAME]
+            return await self.async_step_lock_user_mapping()
+
+        return self.async_show_form(
+            step_id="choose_lock_user_mapping",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_LOCK_USER_NAME): selector.SelectSelector(
+                        selector.SelectSelectorConfig(options=mapping_names)
+                    )
+                }
+            ),
+            description_placeholders={
+                "device": self._device_label(self._selected_lock_uid),
+                "current_mappings": self._mapping_summary(self._selected_lock_uid),
             },
         )
 
@@ -326,6 +354,17 @@ class XHomeOptionsFlow(config_entries.OptionsFlow):
             for mapping in mappings.get(uid, [])
             if (name := _clean_string(mapping.get("name")))
         ]
+
+    def _mapping_for_name(self, uid: str, name: str | None) -> dict[str, Any]:
+        """Return one configured mapping by name."""
+
+        if not name:
+            return {}
+        mappings = _copy_lock_user_mappings(self._config_entry.options)
+        for mapping in mappings.get(uid, []):
+            if _clean_string(mapping.get("name")) == name:
+                return mapping
+        return {}
 
     def _mapping_summary(self, uid: str | None) -> str:
         """Return a compact summary of configured mappings."""
@@ -478,6 +517,12 @@ def _parse_id_list(value: Any) -> list[str]:
         if part and part not in ids:
             ids.append(part)
     return ids
+
+
+def _id_list_string(value: Any) -> str:
+    """Return credential ids as one editable text value."""
+
+    return "\n".join(_parse_id_list(value))
 
 
 def _clean_string(value: Any) -> str:
