@@ -780,7 +780,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         try:
             payload = self.client.list_devices_resilient()
         except XHomeAPIError as err:
-            if not _is_no_user_error(err):
+            if not _is_retriable_device_list_error(err):
                 raise
             self.client.token = None
             self._ensure_login()
@@ -1179,11 +1179,10 @@ def _entry_region(config_entry: ConfigEntry) -> str:
     return config_entry.options.get(CONF_REGION) or config_entry.data.get(CONF_REGION, DEFAULT_REGION)
 
 
-def _is_no_user_error(err: XHomeAPIError) -> bool:
-    """Return whether the API rejected the current token as having no user."""
+def _is_retriable_device_list_error(err: XHomeAPIError) -> bool:
+    """Return whether a device-list failure should be retried with a fresh token."""
 
-    payload = err.payload
-    return err.status_code == 400 and isinstance(payload, dict) and payload.get("message") == "no user"
+    return err.status_code in {400, 401}
 
 
 def _live_token_from_payload(payload: JSON | None) -> str | None:

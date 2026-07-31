@@ -39,12 +39,15 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn("self._local_push_registered_token = None", source)
         self.assertIn('"registered": False', source)
 
-    def test_device_refresh_retries_no_user_by_refreshing_token(self):
+    def test_device_refresh_retries_api_400_or_401_by_refreshing_token(self):
         source = _function_source("_update_data")
+        full_source = COORDINATOR_PATH.read_text()
 
-        self.assertIn("_is_no_user_error(err)", source)
+        self.assertIn("_is_retriable_device_list_error(err)", source)
         self.assertIn("self.client.token = None", source)
         self.assertEqual(source.count("self.client.list_devices_resilient()"), 2)
+        self.assertIn("def _is_retriable_device_list_error", full_source)
+        self.assertIn("err.status_code in {400, 401}", full_source)
 
     def test_lock_state_is_derived_from_lock_and_unlock_events(self):
         source = COORDINATOR_PATH.read_text()
