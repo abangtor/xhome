@@ -320,7 +320,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
 
-        self._cache_manual_lock_state(uid, False, source="ha_unlock")
+        self._cache_manual_unlock(uid)
         self.async_update_listeners()
         return result
 
@@ -970,22 +970,27 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             updated = True
         return updated
 
-    def _cache_manual_lock_state(self, uid: str, is_locked: bool, *, source: str) -> None:
-        """Cache a locally initiated lock-state change."""
+    def _cache_manual_unlock(self, uid: str) -> None:
+        """Cache a locally initiated Home Assistant unlock."""
 
         now = int(time.time())
-        event_key_value = f"{uid}:manual:{source}:{now}"
-        self._latest_lock_state_events[uid] = XHomeLatestEvent(
+        event_key_value = f"{uid}:manual:ha_unlock:{now}"
+        latest = XHomeLatestEvent(
             uid=uid,
             event_key=event_key_value,
             sort_key=(now, event_key_value),
             payload={
                 "event_key": event_key_value,
-                "event_kind": "lock" if is_locked else "unlock",
-                "source": source,
+                "event_kind": "unlock",
+                "event_type_name": "home_assistant_unlock",
+                "lock_user_name": "Home Assistant",
+                "lock_event_app_user": "Home Assistant",
+                "source": "ha_unlock",
                 "time_stamp": now,
             },
         )
+        self._latest_lock_state_events[uid] = latest
+        self._latest_unlock_events[uid] = latest
 
     async def _async_update_latest_event_media(self, events: Iterable[dict[str, Any]]) -> bool:
         """Resolve and cache latest event media from event candidates."""

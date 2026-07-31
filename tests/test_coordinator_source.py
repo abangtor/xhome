@@ -57,7 +57,9 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn("return True", source)
         self.assertIn('if event_kind == "unlock":', source)
         self.assertIn("return False", source)
-        self.assertIn('_cache_manual_lock_state(uid, False, source="ha_unlock")', source)
+        self.assertIn("_cache_manual_unlock(uid)", source)
+        self.assertIn('"lock_user_name": "Home Assistant"', source)
+        self.assertIn("self._latest_unlock_events[uid] = latest", source)
 
 
 if __name__ == "__main__":
