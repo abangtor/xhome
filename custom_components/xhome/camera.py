@@ -45,6 +45,7 @@ LIVE_STATE_WRITE_INTERVAL = 2.0
 NATIVE_CONTROL_KEEPALIVE_INTERVAL = 12.0
 NATIVE_CONTROL_READ_INTERVAL = 2.0
 NATIVE_CONTROL_READ_DURATION = 0.005
+NATIVE_RELAY_READ_SLICE = 0.2
 NATIVE_CONTROL_POST_START_STATUS_COMMANDS = (
     ControlCommand.GET_BATTERY_LEVEL_REQ,
     ControlCommand.GET_DEVICE_RSSI_REQ,
@@ -460,6 +461,22 @@ def _elapsed_ms(started_at: float) -> int:
     return int((time.monotonic() - started_at) * 1000)
 
 
+def _read_native_frames_until_p2p_relays(
+    transport: XHomeLiveCloudTransport,
+    *,
+    duration: float,
+    existing_frames: list[Any] | None = None,
+) -> list[Any]:
+    """Read native control frames, returning early once P2P relays are known."""
+
+    frames = list(existing_frames or [])
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline and not extract_p2p_servers(frames):
+        remaining = deadline - time.monotonic()
+        frames.extend(transport.read_available(duration=min(NATIVE_RELAY_READ_SLICE, remaining)))
+    return frames
+
+
 def _native_mjpeg_path(entry_id: str, uid: str, token: str) -> str:
     """Return the tokenized internal MJPEG path for direct debug access."""
 
@@ -606,10 +623,18 @@ def _run_native_mjpeg_worker(
                 mark_timing("native_initial_read_done")
                 transport.send_frame(metadata.start_command)
                 mark_timing("av_start_sent")
-                native_frames.extend(transport.read_available(duration=3.0))
+                native_frames = _read_native_frames_until_p2p_relays(
+                    transport,
+                    duration=3.0,
+                    existing_frames=native_frames,
+                )
                 mark_timing("native_post_start_read_done")
                 if not extract_p2p_servers(native_frames):
-                    native_frames.extend(transport.read_available(duration=5.0))
+                    native_frames = _read_native_frames_until_p2p_relays(
+                        transport,
+                        duration=5.0,
+                        existing_frames=native_frames,
+                    )
                     mark_timing("native_relay_fallback_done")
 
                 relays = _unique_p2p_relays(extract_p2p_servers(native_frames))
