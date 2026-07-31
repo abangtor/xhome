@@ -46,6 +46,19 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn("self.client.token = None", source)
         self.assertEqual(source.count("self.client.list_devices_resilient()"), 2)
 
+    def test_lock_state_is_derived_from_lock_and_unlock_events(self):
+        source = COORDINATOR_PATH.read_text()
+
+        self.assertIn("_latest_lock_state_events", source)
+        self.assertIn("def latest_lock_state_event", source)
+        self.assertIn("def lock_state", source)
+        self.assertIn("def _update_latest_lock_state_events", source)
+        self.assertIn('if event_kind == "lock":', source)
+        self.assertIn("return True", source)
+        self.assertIn('if event_kind == "unlock":', source)
+        self.assertIn("return False", source)
+        self.assertIn('_cache_manual_lock_state(uid, False, source="ha_unlock")', source)
+
 
 if __name__ == "__main__":
     unittest.main()

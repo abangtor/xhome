@@ -180,6 +180,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._event_poll_seeded = False
         self._latest_events: dict[str, XHomeLatestEvent] = {}
         self._latest_unlock_events: dict[str, XHomeLatestEvent] = {}
+        self._latest_lock_state_events: dict[str, XHomeLatestEvent] = {}
         self._latest_event_media: dict[str, XHomeLatestEventMedia] = {}
         self._latest_event_video_media: dict[str, XHomeLatestEventMedia] = {}
         self._recent_unknown_lock_user_ids: dict[str, list[str]] = {}
@@ -279,6 +280,19 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         return self._latest_unlock_events.get(uid)
 
+    def latest_lock_state_event(self, uid: str) -> XHomeLatestEvent | None:
+        """Return cached latest lock/unlock event used for derived lock state."""
+
+        return self._latest_lock_state_events.get(uid)
+
+    def lock_state(self, uid: str) -> bool | None:
+        """Return derived locked state from the latest lock/unlock event."""
+
+        latest = self.latest_lock_state_event(uid)
+        if latest is None:
+            return None
+        return _lock_state_from_event(latest.payload)
+
     def latest_event_video_media(self, uid: str) -> XHomeLatestEventMedia | None:
         """Return cached latest event video media for a device."""
 
@@ -299,12 +313,16 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         """Unlock a door device through the XHome cloud."""
 
         try:
-            return await self.hass.async_add_executor_job(self._unlock_device, uid)
+            result = await self.hass.async_add_executor_job(self._unlock_device, uid)
         except XHomeAuthError as err:
             self.client.token = None
             raise HomeAssistantError("XHome authentication failed while unlocking") from err
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
+
+        self._cache_manual_lock_state(uid, False, source="ha_unlock")
+        self.async_update_listeners()
+        return result
 
     async def async_set_push_enabled(self, uid: str, enabled: bool) -> JSON:
         """Set the main XHome push notification switch."""
@@ -445,6 +463,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         event_candidates: dict[str, dict[str, Any]] = {}
         unlock_candidates: dict[str, dict[str, Any]] = {}
+        lock_state_candidates: dict[str, dict[str, Any]] = {}
         media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             key = event["event_key"]
@@ -453,6 +472,8 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 _keep_newest_event_candidate(event_candidates, event)
                 if event["payload"].get("event_kind") == "unlock":
                     _keep_newest_event_candidate(unlock_candidates, event)
+                if _lock_state_from_event(event["payload"]) is not None:
+                    _keep_newest_event_candidate(lock_state_candidates, event)
             if is_new and event["has_media"]:
                 media_candidates.append(event)
             if not is_new or seed_only:
@@ -462,6 +483,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         updated = self._update_latest_events(event_candidates.values())
         updated = self._update_latest_unlock_events(unlock_candidates.values()) or updated
+        updated = self._update_latest_lock_state_events(lock_state_candidates.values()) or updated
         if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
@@ -488,6 +510,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         self._fire_event_bus_events(event)
         updated = self._update_latest_events([event])
         updated = self._update_latest_unlock_events([event]) or updated
+        updated = self._update_latest_lock_state_events([event]) or updated
         if event["has_media"] and await self._async_update_latest_event_media([event]):
             updated = True
         if updated:
@@ -509,16 +532,20 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
 
         event_candidates: dict[str, dict[str, Any]] = {}
         unlock_candidates: dict[str, dict[str, Any]] = {}
+        lock_state_candidates: dict[str, dict[str, Any]] = {}
         media_candidates: list[dict[str, Any]] = []
         for event in sorted(events, key=_event_sort_key):
             _keep_newest_event_candidate(event_candidates, event)
             if event["payload"].get("event_kind") == "unlock":
                 _keep_newest_event_candidate(unlock_candidates, event)
+            if _lock_state_from_event(event["payload"]) is not None:
+                _keep_newest_event_candidate(lock_state_candidates, event)
             if event["has_media"]:
                 media_candidates.append(event)
 
         updated = self._update_latest_events(event_candidates.values())
         updated = self._update_latest_unlock_events(unlock_candidates.values()) or updated
+        updated = self._update_latest_lock_state_events(lock_state_candidates.values()) or updated
         if await self._async_update_latest_event_media(media_candidates):
             updated = True
         if updated:
@@ -923,6 +950,43 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             updated = True
         return updated
 
+    def _update_latest_lock_state_events(self, events: Iterable[dict[str, Any]]) -> bool:
+        """Cache the latest lock/unlock event used for derived lock state."""
+
+        updated = False
+        for event in events:
+            if _lock_state_from_event(event["payload"]) is None:
+                continue
+            latest = XHomeLatestEvent(
+                uid=event["uid"],
+                event_key=event["event_key"],
+                sort_key=event["sort_key"],
+                payload=event["payload"],
+            )
+            current = self._latest_lock_state_events.get(latest.uid)
+            if current is not None and current.sort_key > latest.sort_key:
+                continue
+            self._latest_lock_state_events[latest.uid] = latest
+            updated = True
+        return updated
+
+    def _cache_manual_lock_state(self, uid: str, is_locked: bool, *, source: str) -> None:
+        """Cache a locally initiated lock-state change."""
+
+        now = int(time.time())
+        event_key_value = f"{uid}:manual:{source}:{now}"
+        self._latest_lock_state_events[uid] = XHomeLatestEvent(
+            uid=uid,
+            event_key=event_key_value,
+            sort_key=(now, event_key_value),
+            payload={
+                "event_key": event_key_value,
+                "event_kind": "lock" if is_locked else "unlock",
+                "source": source,
+                "time_stamp": now,
+            },
+        )
+
     async def _async_update_latest_event_media(self, events: Iterable[dict[str, Any]]) -> bool:
         """Resolve and cache latest event media from event candidates."""
 
@@ -1146,6 +1210,17 @@ def _keep_newest_event_candidate(candidates: dict[str, dict[str, Any]], event: d
     current = candidates.get(event["uid"])
     if current is None or event["sort_key"] >= current["sort_key"]:
         candidates[event["uid"]] = event
+
+
+def _lock_state_from_event(payload: dict[str, Any]) -> bool | None:
+    """Return derived locked state from a normalized event payload."""
+
+    event_kind = payload.get("event_kind")
+    if event_kind == "lock":
+        return True
+    if event_kind == "unlock":
+        return False
+    return None
 
 
 def _event_bus_types(record: dict[str, Any]) -> tuple[str, ...]:
