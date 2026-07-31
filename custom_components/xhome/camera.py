@@ -634,7 +634,7 @@ def _run_native_mjpeg_worker(
                 def on_native_stats(_stats: dict[str, Any]) -> None:
                     native_control.tick()
 
-                XHomeP2PRendezvousProbe(
+                probe = XHomeP2PRendezvousProbe(
                     uid=metadata.uid,
                     relays=relays,
                     direct_punch_enabled=True,

@@ -55,6 +55,8 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn('mark_timing("p2p_probe_started")', camera_source)
         self.assertIn('mark_timing("first_jpeg_frame")', camera_source)
         self.assertIn('self._record_live_startup_timing("first_mjpeg_frame_written")', camera_source)
+        self.assertIn("probe = XHomeP2PRendezvousProbe", camera_source)
+        self.assertIn("probe.run(", camera_source)
         self.assertIn("lambda generation=stream_generation", camera_source)
         self.assertIn('"X-Accel-Buffering": "no"', camera_source)
         self.assertIn('"Content-Encoding": "identity"', camera_source)
