@@ -45,6 +45,7 @@ LIVE_STATE_WRITE_INTERVAL = 2.0
 NATIVE_CONTROL_KEEPALIVE_INTERVAL = 12.0
 NATIVE_CONTROL_READ_INTERVAL = 2.0
 NATIVE_CONTROL_READ_DURATION = 0.005
+NATIVE_RELAY_READ_SLICE = 0.2
 NATIVE_CONTROL_POST_START_STATUS_COMMANDS = (
     ControlCommand.GET_BATTERY_LEVEL_REQ,
     ControlCommand.GET_DEVICE_RSSI_REQ,
@@ -562,11 +563,14 @@ def _run_native_mjpeg_worker(
             try:
                 native_control = _NativeLiveControlKeeper(transport, metadata)
                 transport.login()
-                native_frames = transport.read_available(duration=1.0)
                 transport.send_frame(metadata.start_command)
-                native_frames.extend(transport.read_available(duration=3.0))
+                native_frames = _read_native_frames_until_p2p_relays(transport, duration=3.0)
                 if not extract_p2p_servers(native_frames):
-                    native_frames.extend(transport.read_available(duration=5.0))
+                    native_frames = _read_native_frames_until_p2p_relays(
+                        transport,
+                        duration=5.0,
+                        existing_frames=native_frames,
+                    )
 
                 relays = _unique_p2p_relays(extract_p2p_servers(native_frames))
                 if not relays:
@@ -680,3 +684,19 @@ def _unique_p2p_relays(servers: list[dict[str, Any]]) -> list[tuple[str, int]]:
             seen.add(relay)
             relays.append(relay)
     return relays
+
+
+def _read_native_frames_until_p2p_relays(
+    transport: XHomeLiveCloudTransport,
+    *,
+    duration: float,
+    existing_frames: list[Any] | None = None,
+) -> list[Any]:
+    """Read native control frames, returning early once P2P relays are known."""
+
+    frames = list(existing_frames or [])
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline and not extract_p2p_servers(frames):
+        remaining = deadline - time.monotonic()
+        frames.extend(transport.read_available(duration=min(NATIVE_RELAY_READ_SLICE, remaining)))
+    return frames

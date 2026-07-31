@@ -72,6 +72,8 @@ class LiveStreamSourceTests(unittest.TestCase):
         self.assertIn("Timed out waiting for next live JPEG frame", camera_source)
         self.assertIn("_NativeLiveControlKeeper", camera_source)
         self.assertIn("native_control.refresh_after_first_frame()", camera_source)
+        self.assertIn("_read_native_frames_until_p2p_relays", camera_source)
+        self.assertIn("NATIVE_RELAY_READ_SLICE = 0.2", camera_source)
         self.assertNotIn("self._send_start_refresh()", camera_source)
         self.assertIn("NATIVE_CONTROL_POST_START_STATUS_COMMANDS", camera_source)
         self.assertIn("NATIVE_CONTROL_POST_START_DEVICE_COMMANDS", camera_source)
