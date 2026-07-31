@@ -111,8 +111,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_mjpeg_last_end_reason: str | None = None
         self._live_mjpeg_stream_generation = 0
         self._live_last_state_write_at = 0.0
-        self._live_startup_started_at = 0.0
-        self._live_startup_timings_ms: dict[str, int] = {}
 
     @property
     def stream_token(self) -> str:
@@ -159,7 +157,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 "live_last_started_at": self._live_last_started_at,
                 "live_last_frame_at": self._live_last_frame_at,
                 "live_last_error": self._live_last_error,
-                "live_startup_timings_ms": dict(self._live_startup_timings_ms),
             }
         )
         if data is not None and data.device_id is not None:
@@ -172,9 +169,7 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         if self.device_data is None:
             raise HomeAssistantError("XHome device is unavailable")
 
-        startup_started_at = time.monotonic()
         session = await self.coordinator.async_prepare_live_stream(self.uid)
-        token_ready_ms = _elapsed_ms(startup_started_at)
         frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
         stop_event = Event()
         loop = asyncio.get_running_loop()
@@ -187,14 +182,9 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         def on_error(message: str) -> None:
             loop.call_soon_threadsafe(self._handle_live_error, message)
 
-        def on_timing(name: str, elapsed_ms: int) -> None:
-            loop.call_soon_threadsafe(self._record_live_startup_timing, name, elapsed_ms)
-
         self._live_streams_started += 1
         self._live_mjpeg_stream_generation += 1
         stream_generation = self._live_mjpeg_stream_generation
-        self._live_startup_started_at = startup_started_at
-        self._live_startup_timings_ms = {"token_ready": token_ready_ms}
         self._live_frames = 0
         self._live_rotated_frames = 0
         self._live_rotation_failures = 0
@@ -215,8 +205,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                 on_frame,
                 on_error,
                 stop_event,
-                startup_started_at,
-                on_timing,
                 lambda generation=stream_generation: self._live_mjpeg_stream_generation == generation,
             ),
             name=f"xhome-live-{redact_uid(self.uid)}",
@@ -277,8 +265,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
                     + b"\r\n"
                 )
                 await response.drain()
-                if self._live_mjpeg_frames_written == 0:
-                    self._record_live_startup_timing("first_mjpeg_frame_written")
                 self._live_mjpeg_frames_written += 1
                 self._write_live_state()
         except asyncio.CancelledError:
@@ -317,16 +303,6 @@ class XHomeLiveCamera(XHomeEntity, Camera):
         self._live_last_error = None
         _replace_latest_frame(frame_queue, frame)
         self._write_live_state()
-
-    def _record_live_startup_timing(self, name: str, elapsed_ms: int | None = None) -> None:
-        """Record one live startup milestone in milliseconds."""
-
-        if name in self._live_startup_timings_ms:
-            return
-        if elapsed_ms is None:
-            elapsed_ms = _elapsed_ms(self._live_startup_started_at)
-        self._live_startup_timings_ms[name] = elapsed_ms
-        self._write_live_state(force=True)
 
     def _rotate_jpeg(self, image: bytes) -> bytes:
         """Apply the configured camera image rotation to JPEG bytes."""
@@ -451,14 +427,6 @@ def _replace_latest_frame(frame_queue: asyncio.Queue[bytes], frame: bytes) -> No
         frame_queue.put_nowait(frame)
     except asyncio.QueueFull:
         pass
-
-
-def _elapsed_ms(started_at: float) -> int:
-    """Return elapsed monotonic time in milliseconds."""
-
-    if started_at <= 0:
-        return 0
-    return int((time.monotonic() - started_at) * 1000)
 
 
 def _read_native_frames_until_p2p_relays(
@@ -594,8 +562,6 @@ def _run_native_mjpeg_worker(
     on_frame: Any,
     on_error: Any,
     stop_event: Event,
-    startup_started_at: float,
-    on_timing: Any | None = None,
     should_send_stop: Any | None = None,
 ) -> None:
     """Run one blocking native live session for the MJPEG response."""
@@ -608,51 +574,32 @@ def _run_native_mjpeg_worker(
         model=session.model,
     )
 
-    def mark_timing(name: str) -> None:
-        if on_timing is not None:
-            on_timing(name, _elapsed_ms(startup_started_at))
-
     try:
         with XHomeLiveCloudTransport(metadata, verify_tls=False) as transport:
-            mark_timing("native_connected")
             try:
                 native_control = _NativeLiveControlKeeper(transport, metadata)
                 transport.login()
-                mark_timing("native_login_sent")
                 native_frames = transport.read_available(duration=1.0)
-                mark_timing("native_initial_read_done")
                 transport.send_frame(metadata.start_command)
-                mark_timing("av_start_sent")
                 native_frames = _read_native_frames_until_p2p_relays(
                     transport,
                     duration=3.0,
                     existing_frames=native_frames,
                 )
-                mark_timing("native_post_start_read_done")
                 if not extract_p2p_servers(native_frames):
                     native_frames = _read_native_frames_until_p2p_relays(
                         transport,
                         duration=5.0,
                         existing_frames=native_frames,
                     )
-                    mark_timing("native_relay_fallback_done")
 
                 relays = _unique_p2p_relays(extract_p2p_servers(native_frames))
                 if not relays:
                     commands = [frame.command for frame in native_frames]
                     raise RuntimeError(f"Native IoT session did not return any P2P relays; commands={commands}")
-                mark_timing("p2p_relays_ready")
                 LOGGER.info("XHome native live stream using relays: %s", relays)
 
-                first_media_timing_sent = False
-
                 def on_native_frame(frame: LiveAppMediaFrame) -> None:
-                    nonlocal first_media_timing_sent
-                    if not first_media_timing_sent:
-                        first_media_timing_sent = True
-                        mark_timing("first_media_frame")
-                    if frame.media_type == MediaType.JPEG_FRAME:
-                        mark_timing("first_jpeg_frame")
                     native_control.refresh_after_first_frame()
                     on_frame(frame)
 
@@ -664,7 +611,6 @@ def _run_native_mjpeg_worker(
                     relays=relays,
                     direct_punch_enabled=True,
                 )
-                mark_timing("p2p_probe_started")
                 probe.run(
                     duration=MJPEG_STREAM_DURATION,
                     on_frame=on_native_frame,
