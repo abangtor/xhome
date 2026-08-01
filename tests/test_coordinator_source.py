@@ -5,6 +5,7 @@ import unittest
 
 
 COORDINATOR_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "xhome" / "coordinator.py"
+LOCK_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "xhome" / "lock.py"
 
 
 def _function_source(name: str) -> str:
@@ -51,6 +52,7 @@ class CoordinatorSourceTests(unittest.TestCase):
 
     def test_lock_state_is_derived_from_lock_and_unlock_events(self):
         source = COORDINATOR_PATH.read_text()
+        lock_source = LOCK_PATH.read_text()
 
         self.assertIn("_latest_lock_state_events", source)
         self.assertIn("def latest_lock_state_event", source)
@@ -60,9 +62,14 @@ class CoordinatorSourceTests(unittest.TestCase):
         self.assertIn("return True", source)
         self.assertIn('if event_kind == "unlock":', source)
         self.assertIn("return False", source)
-        self.assertIn("_cache_manual_unlock(uid)", source)
+        self.assertIn("_async_manual_unlock_actor", source)
+        self.assertIn("_person_entity_id_for_user", source)
+        self.assertIn("_lock_user_name_for_person", source)
         self.assertIn('"lock_user_name": "Home Assistant"', source)
+        self.assertIn('"lock_person"', source)
         self.assertIn("self._latest_unlock_events[uid] = latest", source)
+        self.assertIn('getattr(self, "context", None) or getattr(self, "_context", None)', lock_source)
+        self.assertIn('getattr(context, "user_id", None)', lock_source)
 
 
 if __name__ == "__main__":

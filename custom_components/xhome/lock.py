@@ -57,7 +57,8 @@ class XHomeLockEntity(XHomeEntity, LockEntity):
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock the door through the XHome cloud."""
 
-        await self.coordinator.async_unlock_device(self.uid)
+        context = getattr(self, "context", None) or getattr(self, "_context", None)
+        await self.coordinator.async_unlock_device(self.uid, getattr(context, "user_id", None))
         await self.coordinator.async_request_refresh()
 
     async def async_lock(self, **kwargs: Any) -> None:

@@ -309,7 +309,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise UpdateFailed(f"XHome update failed: {err}") from err
 
-    async def async_unlock_device(self, uid: str) -> JSON:
+    async def async_unlock_device(self, uid: str, context_user_id: str | None = None) -> JSON:
         """Unlock a door device through the XHome cloud."""
 
         try:
@@ -320,7 +320,8 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
         except (XHomeAPIError, XHomeError, requests.RequestException, TimeoutError, ValueError) as err:
             raise HomeAssistantError(f"XHome unlock failed: {err}") from err
 
-        self._cache_manual_unlock(uid)
+        actor = await self._async_manual_unlock_actor(uid, context_user_id)
+        self._cache_manual_unlock(uid, actor)
         self.async_update_listeners()
         return result
 
@@ -970,11 +971,65 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
             updated = True
         return updated
 
-    def _cache_manual_unlock(self, uid: str) -> None:
+    async def _async_manual_unlock_actor(self, uid: str, context_user_id: str | None) -> dict[str, str]:
+        """Return actor fields for a locally initiated Home Assistant unlock."""
+
+        actor = {
+            "lock_user_name": "Home Assistant",
+            "lock_event_app_user": "Home Assistant",
+        }
+        if not context_user_id:
+            return actor
+
+        user = await self.hass.auth.async_get_user(context_user_id)
+        user_name = string_value(getattr(user, "name", None))
+        if user_name:
+            actor["lock_user_name"] = user_name
+            actor["lock_event_app_user"] = user_name
+
+        person_entity_id = self._person_entity_id_for_user(context_user_id)
+        if not person_entity_id:
+            return actor
+
+        actor["lock_person"] = person_entity_id
+        if mapping_name := self._lock_user_name_for_person(uid, person_entity_id):
+            actor["lock_user_name"] = mapping_name
+        return actor
+
+    def _person_entity_id_for_user(self, user_id: str) -> str | None:
+        """Return the Home Assistant person entity linked to a user id."""
+
+        for state in self.hass.states.async_all("person"):
+            if state.attributes.get("user_id") == user_id:
+                return state.entity_id
+        return None
+
+    def _lock_user_name_for_person(self, uid: str, person_entity_id: str) -> str | None:
+        """Return configured XHome lock-user name for a Home Assistant person."""
+
+        mappings = self.config_entry.options.get(CONF_LOCK_USER_MAPPINGS)
+        if not isinstance(mappings, dict):
+            return None
+        device_mappings = mappings.get(uid)
+        if not isinstance(device_mappings, list):
+            return None
+        for mapping in device_mappings:
+            if not isinstance(mapping, dict):
+                continue
+            if string_value(mapping.get("person")) != person_entity_id:
+                continue
+            return string_value(mapping.get("name"))
+        return None
+
+    def _cache_manual_unlock(self, uid: str, actor: dict[str, str] | None = None) -> None:
         """Cache a locally initiated Home Assistant unlock."""
 
         now = int(time.time())
         event_key_value = f"{uid}:manual:ha_unlock:{now}"
+        actor = actor or {
+            "lock_user_name": "Home Assistant",
+            "lock_event_app_user": "Home Assistant",
+        }
         latest = XHomeLatestEvent(
             uid=uid,
             event_key=event_key_value,
@@ -983,8 +1038,7 @@ class XHomeDataUpdateCoordinator(DataUpdateCoordinator[XHomeCoordinatorData]):
                 "event_key": event_key_value,
                 "event_kind": "unlock",
                 "event_type_name": "home_assistant_unlock",
-                "lock_user_name": "Home Assistant",
-                "lock_event_app_user": "Home Assistant",
+                **actor,
                 "source": "ha_unlock",
                 "time_stamp": now,
             },
